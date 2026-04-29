@@ -1,0 +1,18 @@
+/* Cascade order matters here:
+ *   1. tokens.css     — design tokens + base body/html (already imported in main.tsx
+ *                       via @scoach/tokens/tokens.css)
+ *   2. base.css       — additional resets, utility helpers, animation keyframes
+ *   3. layout.css     — live meeting 3-column layout, shared component classes
+ *                       (.card, .pill-btn, .seg, .panel, etc.)
+ *   4. screens.css    — dashboard, pre-meeting, summary, modals, RTL overrides
+ *   5. auth.css       — sign-in, API key setup, settings
+ *   6. share-popover.css — history-row share popover (Floating UI)
+ *   7. references.css — reference-link block in client email
+ */
+
+@import "./base.css";
+@import "./layout.css";
+@import "./screens.css";
+@import "./auth.css";
+@import "./share-popover.css";
+@import "./references.css";

@@ -1,0 +1,12 @@
+{
+  "extends": "@scoach/tsconfig/react.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "rootDir": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "types": ["vite/client"]
+  },
+  "include": ["src", "tests"]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@scoach/types",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api.ts",
+    "./ws": "./src/ws.ts",
+    "./meeting": "./src/meeting.ts",
+    "./user": "./src/user.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "echo no-tests"
+  },
+  "devDependencies": {
+    "@scoach/tsconfig": "workspace:*",
+    "typescript": "5.6.3"
+  }
+}

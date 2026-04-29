@@ -1,0 +1,39 @@
+name: Deploy prod
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  trigger-cloud-build:
+    runs-on: ubuntu-latest
+    environment: production       # GitHub manual approval gate
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PROD }}
+          service_account: cicd@gcp-sales-coach-prod.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: gcp-sales-coach-prod
+
+      - name: Trigger api build
+        run: |
+          gcloud builds submit \
+            --config=infra/cloudbuild/cloudbuild.api.yaml \
+            --substitutions=_ENV=prod,_SERVICE=scoach-api-prod \
+            .
+
+      - name: Trigger web build
+        run: |
+          gcloud builds submit \
+            --config=infra/cloudbuild/cloudbuild.web.yaml \
+            --substitutions=_ENV=prod,_BUCKET=gcp-sales-coach-prod-web \
+            .

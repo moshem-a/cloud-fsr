@@ -1,0 +1,3 @@
+project_id   = "gcp-sales-coach-dev"
+region       = "us-central1"
+domain_name  = "dev.salescoach.cloud.google"

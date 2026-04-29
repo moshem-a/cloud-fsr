@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Audio Capture Spike — GCP Sales Coach (Risk 1)</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --blue: #1A73E8;
+        --green: #1E8E3E;
+        --red: #EA4335;
+        --yellow: #F9AB00;
+        --bg: #f6f8fb;
+        --surface: #ffffff;
+        --text-1: #202124;
+        --text-3: #5f6368;
+        --border: #dadce0;
+        --mono: "JetBrains Mono", "Roboto Mono", ui-monospace, Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg); color: var(--text-1);
+        padding: 32px;
+        max-width: 920px; margin: 0 auto;
+      }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-3); margin: 24px 0 8px; }
+      .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(60,64,67,.06); }
+      button {
+        font: inherit; padding: 10px 16px; border-radius: 8px; cursor: pointer;
+        background: var(--blue); color: #fff; border: 0;
+        margin-right: 8px; margin-bottom: 8px;
+      }
+      button.secondary { background: transparent; color: var(--blue); border: 1px solid var(--blue); }
+      button.danger { background: var(--red); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      .stat { font-family: var(--mono); font-size: 12px; padding: 6px 10px; background: #f1f3f6; border-radius: 6px; }
+      .stat strong { color: var(--blue); }
+      .ok { color: var(--green); }
+      .warn { color: var(--yellow); }
+      .err { color: var(--red); }
+      pre { font-family: var(--mono); background: #f1f3f6; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; max-height: 360px; }
+      .meter { height: 12px; width: 100%; background: #e8eaed; border-radius: 6px; overflow: hidden; }
+      .meter-bar { height: 100%; background: linear-gradient(90deg, var(--green), var(--yellow), var(--red)); width: 0%; transition: width 60ms linear; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      td, th { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+      th { color: var(--text-3); font-weight: 500; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #e8f0fe; color: var(--blue); font-size: 11px; font-weight: 600; }
+      .step { display: flex; gap: 12px; padding: 8px 0; }
+      .step-num { background: var(--blue); color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Audio Capture Spike — Risk 1</h1>
+    <p style="color:var(--text-3); margin-top:0;">
+      Validates that <code>getDisplayMedia({ audio: true })</code> reliably captures Google Meet tab audio,
+      resamples to 16 kHz mono PCM, and is suitable for streaming to Cloud STT V2 (Chirp 3).
+      Pre-Sprint 1 derisking per <a href="../../docs/adr/0006-audio-capture.md">ADR 0006</a> (to be written based on results).
+    </p>
+
+    <div class="card">
+      <h2>Browser support detection</h2>
+      <div id="support" class="row"></div>
+    </div>
+
+    <div class="card">
+      <h2>Step-by-step instructions</h2>
+      <div class="step"><div class="step-num">1</div><div>Open <a href="https://meet.google.com" target="_blank">meet.google.com</a> in a separate tab. Join a test meeting (you can be alone in it).</div></div>
+      <div class="step"><div class="step-num">2</div><div>Come back to this tab. Click <strong>Start capture</strong>.</div></div>
+      <div class="step"><div class="step-num">3</div><div>In the picker, choose <strong>Chrome Tab</strong>, select your Meet tab, and <strong>tick &ldquo;Share tab audio&rdquo;</strong>. (Critical — without this checkbox, no audio is captured.)</div></div>
+      <div class="step"><div class="step-num">4</div><div>Speak into your mic in the Meet tab. The level meter and PCM stats below should react.</div></div>
+      <div class="step"><div class="step-num">5</div><div>Watch for dropouts when you mute/unmute Meet. Note any anomalies in the event log.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Capture controls</h2>
+      <div class="row">
+        <button id="start">Start capture</button>
+        <button id="stop" class="danger" disabled>Stop</button>
+        <button id="record" class="secondary" disabled>Record 30s WebM</button>
+        <button id="exportPcm" class="secondary" disabled>Download last 10s PCM</button>
+      </div>
+      <div style="margin-top:12px;">
+        <div class="meter"><div id="meter" class="meter-bar"></div></div>
+        <div class="row" style="margin-top:8px;">
+          <span class="stat">Status: <strong id="status">idle</strong></span>
+          <span class="stat">Track: <strong id="trackLabel">—</strong></span>
+          <span class="stat">Sample rate (in): <strong id="srIn">—</strong></span>
+          <span class="stat">Sample rate (out): <strong>16000</strong></span>
+          <span class="stat">Channels: <strong id="channels">—</strong></span>
+          <span class="stat">Frames sent: <strong id="frames">0</strong></span>
+          <span class="stat">Bytes sent: <strong id="bytes">0</strong></span>
+          <span class="stat">RMS dB: <strong id="rms">—</strong></span>
+          <span class="stat">Peak dB: <strong id="peak">—</strong></span>
+          <span class="stat">Silent frames: <strong id="silentFrames">0</strong></span>
+          <span class="stat">Drop events: <strong id="drops">0</strong></span>
+          <span class="stat">Elapsed: <strong id="elapsed">0s</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Event log</h2>
+      <pre id="log">(start a capture to see events)</pre>
+    </div>
+
+    <div class="card">
+      <h2>What to record in the ADR</h2>
+      <ul>
+        <li>Per OS+browser combo: did <em>tab audio</em> work? Did <em>system audio</em> work?</li>
+        <li>What happens when the user mutes Meet locally — does the captured stream go silent or does the rep voice get dropped?</li>
+        <li>Any audio cutouts, glitches, or sample-rate mismatches.</li>
+        <li>Permissions UX — how confused was the user during the picker step?</li>
+        <li>Resampler CPU cost (open DevTools Performance, check the AudioWorklet thread).</li>
+      </ul>
+    </div>
+
+    <script type="module" src="./spike.js"></script>
+  </body>
+</html>

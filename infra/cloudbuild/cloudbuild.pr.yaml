@@ -1,0 +1,36 @@
+# PR pipeline — lint, type, test
+steps:
+  - name: node:20-bookworm-slim
+    id: install
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        corepack enable
+        corepack prepare pnpm@9.12.0 --activate
+        pnpm install --frozen-lockfile
+
+  - name: node:20-bookworm-slim
+    id: lint
+    waitFor: ['install']
+    entrypoint: bash
+    args: ['-c', 'corepack enable && pnpm lint']
+
+  - name: node:20-bookworm-slim
+    id: typecheck
+    waitFor: ['install']
+    entrypoint: bash
+    args: ['-c', 'corepack enable && pnpm typecheck']
+
+  - name: node:20-bookworm-slim
+    id: test
+    waitFor: ['install']
+    entrypoint: bash
+    args: ['-c', 'corepack enable && pnpm test']
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1200s

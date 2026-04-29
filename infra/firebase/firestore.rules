@@ -1,0 +1,96 @@
+rules_version = '2';
+
+// GCP Sales Coach Firestore rules.
+// - Server (admin SDK) bypasses these rules entirely.
+// - Browser clients can READ live-meeting subcollections they own.
+// - Browser clients NEVER write to transcript/hints/sentiment (server-only).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    function isAllowedDomain() {
+      return isAuthed()
+        && request.auth.token.email != null
+        && (request.auth.token.email.matches('.*@google[.]com$')
+            || request.auth.token.email.matches('.*@altostrat[.]com$')
+            || request.auth.token.email.matches('.*@moshem[.]altostrat[.]com$'))
+        && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isAuthed() && request.auth.uid == uid;
+    }
+
+    function isMeetingOwner(meetingId) {
+      return isAuthed()
+        && get(/databases/$(database)/documents/meetings/$(meetingId)).data.ownerUid == request.auth.uid;
+    }
+
+    // Users — own profile only
+    match /users/{uid} {
+      allow read:  if isAllowedDomain() && isOwner(uid);
+      allow write: if isAllowedDomain() && isOwner(uid);
+    }
+
+    // Meetings — owner full, shared users get read
+    match /meetings/{meetingId} {
+      allow read: if isAllowedDomain()
+        && (resource.data.ownerUid == request.auth.uid
+            || (resource.data.sharedWithUids is list
+                && resource.data.sharedWithUids.hasAny([request.auth.uid])));
+      allow create: if isAllowedDomain()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isAllowedDomain()
+        && resource.data.ownerUid == request.auth.uid;
+
+      // Live transcript — server-written, client-readable.
+      match /transcript/{lineId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // Live AI hints — server-written, client-readable.
+      match /hints/{hintId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // Sentiment samples + events — server-written, client-readable.
+      match /sentiment/{sampleId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // Pre-meeting follow-up suggestions — server-written, client-readable.
+      match /followups/{itemId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // Live status doc (single doc with listening/muted/lastEntities) — server-written.
+      match /live/{stateId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // Private notes — owner read+write directly (no server roundtrip needed).
+      match /notes/{noteId} {
+        allow read, write: if isAllowedDomain() && isMeetingOwner(meetingId);
+      }
+    }
+
+    // Shares — server-only (admin SDK).
+    match /shares/{shareId} {
+      allow read, write: if false;
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Default deny. Context uploads happen via signed URLs minted by the API,
+// not direct from the browser, so client SDKs never need write access.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

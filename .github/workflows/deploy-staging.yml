@@ -1,0 +1,38 @@
+name: Deploy staging
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  trigger-cloud-build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Workload Identity Federation
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_STAGING }}
+          service_account: cicd@gcp-sales-coach-staging.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: gcp-sales-coach-staging
+
+      - name: Trigger api build
+        run: |
+          gcloud builds submit \
+            --config=infra/cloudbuild/cloudbuild.api.yaml \
+            --substitutions=_ENV=staging,_SERVICE=scoach-api-staging \
+            .
+
+      - name: Trigger web build
+        run: |
+          gcloud builds submit \
+            --config=infra/cloudbuild/cloudbuild.web.yaml \
+            --substitutions=_ENV=staging,_BUCKET=gcp-sales-coach-staging-web \
+            .

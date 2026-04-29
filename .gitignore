@@ -1,0 +1,47 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build
+dist/
+build/
+out/
+.turbo/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# test/coverage
+coverage/
+.nyc_output/
+
+# infra (state stays in remote backends)
+infra/terraform/**/.terraform/
+infra/terraform/**/terraform.tfstate*
+infra/terraform/**/.terraform.lock.hcl
+
+# firebase
+.firebase/
+firebase-debug.log
+
+# storybook
+storybook-static/
+
+# spike artifacts
+spikes/**/captures/

@@ -1,0 +1,9 @@
+{
+  "extends": "@scoach/tsconfig/react.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["react"]
+  },
+  "include": ["src/**/*"]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@scoach/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "echo 'Sprint 5 will wire tsup/esbuild bundling for Docker image'",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/cors": "10.0.1",
+    "@fastify/websocket": "11.0.1",
+    "@google-cloud/speech": "6.7.1",
+    "@google-cloud/vertexai": "1.9.2",
+    "@google/genai": "^1.50.1",
+    "@scoach/types": "workspace:*",
+    "fastify": "5.1.0",
+    "firebase-admin": "12.7.0",
+    "pdf-lib": "1.17.1",
+    "pino": "9.5.0",
+    "pino-pretty": "11.3.0",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@scoach/tsconfig": "workspace:*",
+    "@types/node": "20.16.13",
+    "supertest": "7.0.0",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "vitest": "2.1.4"
+  }
+}
