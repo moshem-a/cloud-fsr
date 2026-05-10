@@ -297,3 +297,9 @@ export const Inbox = (p: IconProps) => (
     <path d="M5.5 5h13l3 7v6a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-6l3-7z" />
   </svg>
 );
+
+export const Chart = (p: IconProps) => (
+  <svg {...svg(p.size ?? 16, p)} {...base}>
+    <path d="M4 20V10M10 20V4M16 20v-8M22 20v-4" />
+  </svg>
+);

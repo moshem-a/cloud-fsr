@@ -1,4 +1,4 @@
-import type { Hint, Meeting, SentimentEvent, TranscriptLine } from "@scoach/types";
+import type { Hint, Infographic, Meeting, SentimentEvent, TranscriptLine } from "@scoach/types";
 
 export const LIVE_MEETING: Meeting = {
   id: "m-aviv-3",
@@ -176,4 +176,82 @@ export const SENTIMENT_EVENTS: SentimentEvent[] = [
   { at: 8, label: "Hesitation detected", kind: "concern" },
   { at: 12, label: "Engagement rising", kind: "positive" },
   { at: 18, label: "Buying signal", kind: "buying" },
+];
+
+export const MOCK_INFOGRAPHICS: Infographic[] = [
+  {
+    id: "ig-1",
+    kind: "steps",
+    title: "Migration Roadmap",
+    generatedAt: new Date().toISOString(),
+    data: {
+      steps: [
+        { title: "Assessment", detail: "Audit Bedrock usage" },
+        { title: "POC", detail: "Vertex AI Model Garden" },
+        { title: "Migrate", detail: "Re-point endpoints" },
+        { title: "Optimize", detail: "Regional tuning" },
+      ],
+    },
+  },
+  {
+    id: "ig-2",
+    kind: "flow",
+    title: "Current Architecture",
+    generatedAt: new Date().toISOString(),
+    data: {
+      nodes: [
+        { id: "app", label: "Trading App" },
+        { id: "api", label: "API Gateway" },
+        { id: "bedrock", label: "AWS Bedrock" },
+        { id: "vertex", label: "Vertex AI" },
+        { id: "bq", label: "BigQuery" },
+      ],
+      edges: [
+        { from: "app", to: "api" },
+        { from: "api", to: "bedrock", label: "current" },
+        { from: "api", to: "vertex", label: "planned" },
+        { from: "vertex", to: "bq", label: "logs" },
+      ],
+    },
+  },
+  {
+    id: "ig-3",
+    kind: "comparison",
+    title: "Bedrock vs Vertex AI",
+    generatedAt: new Date().toISOString(),
+    data: {
+      columns: [
+        { header: "Bedrock", items: ["3 regions", "150ms p50", "$2.1/M tokens", "Limited fine-tune"] },
+        { header: "Vertex AI", items: ["8 regions", "95ms p50", "$1.8/M tokens", "Full fine-tune + distill"] },
+      ],
+    },
+  },
+  {
+    id: "ig-4",
+    kind: "gantt",
+    title: "Project Timeline",
+    generatedAt: new Date().toISOString(),
+    data: {
+      tasks: [
+        { name: "Assessment", start: "2026-05-01", end: "2026-05-15" },
+        { name: "POC Build", start: "2026-05-12", end: "2026-06-01" },
+        { name: "Migration", start: "2026-06-01", end: "2026-07-15" },
+        { name: "Go-live", start: "2026-07-15", end: "2026-07-31" },
+      ],
+    },
+  },
+  {
+    id: "ig-5",
+    kind: "timeline",
+    title: "Key Discussion Points",
+    generatedAt: new Date().toISOString(),
+    data: {
+      entries: [
+        { label: "Latency requirements discussed", date: "14:05", detail: "Sub-100ms p50 target" },
+        { label: "Bedrock cost concerns raised", date: "14:12", detail: "$2.1/M tokens current spend" },
+        { label: "Model Garden demo requested", date: "14:18", detail: "Gemma 2 + regional endpoints" },
+        { label: "POC timeline agreed", date: "14:25", detail: "2-week assessment phase" },
+      ],
+    },
+  },
 ];

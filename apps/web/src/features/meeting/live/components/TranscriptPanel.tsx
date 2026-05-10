@@ -1,7 +1,8 @@
-import { MicOff, Search } from "@scoach/ui/icons";
+import { Chart, MicOff, Search } from "@scoach/ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useLiveMeetingStore } from "../store.ts";
+import { InfographicPanel } from "./InfographicPanel.tsx";
 import { QuietBar } from "./QuietBar.tsx";
 import { TranscriptLine } from "./TranscriptLine.tsx";
 
@@ -18,16 +19,18 @@ export function TranscriptPanel({ meetingId }: TranscriptPanelProps) {
   const listening = useLiveMeetingStore((s) => s.listening);
   const sttError = useLiveMeetingStore((s) => s.sttError);
   const livePartial = useLiveMeetingStore((s) => s.livePartial);
+  const rightTab = useLiveMeetingStore((s) => s.rightPanelTab);
+  const setRightTab = useLiveMeetingStore((s) => s.setRightPanelTab);
 
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && rightTab === "transcript") {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [transcript.length]);
+  }, [transcript.length, rightTab]);
 
   const visible = useMemo(
     () =>
@@ -47,95 +50,110 @@ export function TranscriptPanel({ meetingId }: TranscriptPanelProps) {
     <section className="panel transcript-panel">
       <div className="panel-head">
         <div className="panel-title-row">
-          <h2 className="panel-title">Live transcript</h2>
-        </div>
-        <div className="panel-actions">
-          <div className="search-box">
-            <Search size={14} />
-            <input
-              type="search"
-              placeholder="Search transcript…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="seg seg-sm">
-            <button type="button" className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>
-              All
+          <div className="seg seg-sm right-tab-seg">
+            <button type="button" className={rightTab === "infographics" ? "on" : ""} onClick={() => setRightTab("infographics")}>
+              <Chart size={13} /> Infographics
             </button>
-            <button type="button" className={filter === "client" ? "on" : ""} onClick={() => setFilter("client")}>
-              Client
-            </button>
-            <button type="button" className={filter === "rep" ? "on" : ""} onClick={() => setFilter("rep")}>
-              You
+            <button type="button" className={rightTab === "transcript" ? "on" : ""} onClick={() => setRightTab("transcript")}>
+              Transcript
             </button>
           </div>
         </div>
-      </div>
-
-      {sttError && (
-        <div
-          style={{
-            padding: "8px 12px",
-            margin: "8px 12px 0",
-            borderRadius: 6,
-            background: "var(--gc-red-50, #fdecea)",
-            color: "var(--gc-red, #b00020)",
-            fontSize: 13,
-            border: "1px solid var(--gc-red, #b00020)",
-          }}
-        >
-          Transcription unavailable: {sttError}
-        </div>
-      )}
-
-      <div className="transcript-scroll scroll" ref={scrollRef}>
-        {visible.map((l) => (
-          <TranscriptLine key={l.id} line={l} lang={lang} />
-        ))}
-
-        {livePartial && (
-          <div
-            style={{
-              padding: "8px 14px",
-              margin: "4px 12px 8px",
-              borderLeft: "2px dashed var(--text-4)",
-              color: "var(--text-3)",
-              fontStyle: "italic",
-              fontSize: 14,
-              lineHeight: 1.45,
-              opacity: 0.85,
-            }}
-            title="Live partial transcript — being revised in real time"
-          >
-            {livePartial}
-            <span className="dot dot-pulse" style={{ marginLeft: 6, background: "var(--text-4)" }} />
+        {rightTab === "transcript" && (
+          <div className="panel-actions">
+            <div className="search-box">
+              <Search size={14} />
+              <input
+                type="search"
+                placeholder="Search transcript…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="seg seg-sm">
+              <button type="button" className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>
+                All
+              </button>
+              <button type="button" className={filter === "client" ? "on" : ""} onClick={() => setFilter("client")}>
+                Client
+              </button>
+              <button type="button" className={filter === "rep" ? "on" : ""} onClick={() => setFilter("rep")}>
+                You
+              </button>
+            </div>
           </div>
         )}
-
-        {muted ? (
-          <div className="t-muted-row">
-            <MicOff size={14} /> Listening paused — hint generation suspended. Audio still captured locally.
-          </div>
-        ) : !listening ? (
-          <div className="t-typing">
-            <div className="t-typing-bubble">
-              <span className="t-typing-label" style={{ color: "var(--text-3)" }}>
-                Take notes here. Live transcription is optional — enable it from the left rail any time.
-              </span>
-            </div>
-          </div>
-        ) : transcript.length === 0 ? (
-          <div className="t-typing">
-            <div className="t-typing-bubble">
-              <span className="dot dot-pulse" style={{ background: "var(--text-3)" }} />
-              <span className="dot dot-pulse" style={{ background: "var(--text-3)", animationDelay: "150ms" }} />
-              <span className="dot dot-pulse" style={{ background: "var(--text-3)", animationDelay: "300ms" }} />
-              <span className="t-typing-label">Listening for speech…</span>
-            </div>
-          </div>
-        ) : null}
       </div>
+
+      {rightTab === "infographics" ? (
+        <InfographicPanel />
+      ) : (
+        <>
+          {sttError && (
+            <div
+              style={{
+                padding: "8px 12px",
+                margin: "8px 12px 0",
+                borderRadius: 6,
+                background: "var(--gc-red-50, #fdecea)",
+                color: "var(--gc-red, #b00020)",
+                fontSize: 13,
+                border: "1px solid var(--gc-red, #b00020)",
+              }}
+            >
+              Transcription unavailable: {sttError}
+            </div>
+          )}
+
+          <div className="transcript-scroll scroll" ref={scrollRef}>
+            {visible.map((l) => (
+              <TranscriptLine key={l.id} line={l} lang={lang} />
+            ))}
+
+            {livePartial && (
+              <div
+                style={{
+                  padding: "8px 14px",
+                  margin: "4px 12px 8px",
+                  borderLeft: "2px dashed var(--text-4)",
+                  color: "var(--text-3)",
+                  fontStyle: "italic",
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                  opacity: 0.85,
+                }}
+                title="Live partial transcript — being revised in real time"
+              >
+                {livePartial}
+                <span className="dot dot-pulse" style={{ marginLeft: 6, background: "var(--text-4)" }} />
+              </div>
+            )}
+
+            {muted ? (
+              <div className="t-muted-row">
+                <MicOff size={14} /> Listening paused — hint generation suspended. Audio still captured locally.
+              </div>
+            ) : !listening ? (
+              <div className="t-typing">
+                <div className="t-typing-bubble">
+                  <span className="t-typing-label" style={{ color: "var(--text-3)" }}>
+                    Take notes here. Live transcription is optional — enable it from the left rail any time.
+                  </span>
+                </div>
+              </div>
+            ) : transcript.length === 0 ? (
+              <div className="t-typing">
+                <div className="t-typing-bubble">
+                  <span className="dot dot-pulse" style={{ background: "var(--text-3)" }} />
+                  <span className="dot dot-pulse" style={{ background: "var(--text-3)", animationDelay: "150ms" }} />
+                  <span className="dot dot-pulse" style={{ background: "var(--text-3)", animationDelay: "300ms" }} />
+                  <span className="t-typing-label">Listening for speech…</span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </>
+      )}
 
       <QuietBar meetingId={meetingId} />
     </section>

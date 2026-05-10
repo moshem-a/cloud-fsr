@@ -1,4 +1,4 @@
-import type { Hint, TranscriptLine } from "@scoach/types";
+import type { Hint, Participant, TranscriptLine } from "@scoach/types";
 import { randomUUID } from "node:crypto";
 
 import { meetingsRepo } from "../repos/meetings.repo.ts";
@@ -10,6 +10,7 @@ import {
   extractActionItem,
   generateFollowups,
   generateHint,
+  generateInfographic,
   generateLiveTip,
   generateQuickAnswer,
   hasActionItemPattern,
@@ -39,6 +40,8 @@ export type { SpeakerRole };
 const SENTIMENT_TICK_MS = 20_000;
 const FOLLOWUPS_TICK_MS = 60_000;
 const TIPS_TICK_MS = 25_000;
+const INFOGRAPHIC_TICK_MS = 45_000;
+const INFOGRAPHIC_MIN_LINES = 5;
 const ROLLING_WINDOW = 12;
 // Hint heuristic: fire a hint cycle on every final transcript line. Dedup via
 // recentHintTitles prevents flooding. Time gate (HINT_TIME_MS) still applies.
@@ -80,6 +83,14 @@ interface ActiveSession {
   lastQuickAnswerAt: number;
   // Action item debounce (covers both rep commitments and client requests)
   lastActionItemAt: number;
+  // Participant tracking — collects unique speakers from transcript
+  seenSpeakers: Map<string, { side: "client" | "rep" }>;
+  lastParticipantPatchAt: number;
+  // Infographic generation
+  infographicTick: NodeJS.Timeout | null;
+  lastInfographicAt: number;
+  infographicInFlight: boolean;
+  linesAtLastInfographic: number;
 }
 
 const NOOP_STT: SttSession = { pushAudio: () => {}, close: () => {} };
@@ -124,6 +135,12 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     lastPartialWriteAt: 0,
     lastQuickAnswerAt: 0,
     lastActionItemAt: 0,
+    seenSpeakers: new Map(),
+    lastParticipantPatchAt: 0,
+    infographicTick: null,
+    lastInfographicAt: 0,
+    infographicInFlight: false,
+    linesAtLastInfographic: 0,
   };
 
   // Cache meeting goal once — avoids a Firestore read on every hint/tip/answer cycle.
@@ -206,7 +223,10 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     session.tipsTick = setInterval(() => {
       void runTipsTick(session);
     }, TIPS_TICK_MS);
-    console.log(`[audio-session] started sentiment+followups+tips timers for ${meetingId}`);
+    session.infographicTick = setInterval(() => {
+      void runInfographicTick(session);
+    }, INFOGRAPHIC_TICK_MS);
+    console.log(`[audio-session] started sentiment+followups+tips+infographic timers for ${meetingId}`);
   } else {
     console.warn(`[audio-session] Gemini disabled (no GCP_PROJECT_ID), skipping hint/sentiment/followups for ${meetingId}`);
   }
@@ -221,6 +241,8 @@ export function stopSession(meetingId: string): void {
   if (s.sentimentTick) clearInterval(s.sentimentTick);
   if (s.followupsTick) clearInterval(s.followupsTick);
   if (s.tipsTick) clearInterval(s.tipsTick);
+  if (s.infographicTick) clearInterval(s.infographicTick);
+  void patchParticipants(s).catch(() => {});
   for (const role of ["rep", "client"] as const) {
     try {
       s.stt[role].close();
@@ -277,6 +299,16 @@ async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Pr
   // 2. Entity extraction — regex-only for speed (no Gemini call).
   for (const e of regexEntities(line.text)) session.seenEntities.add(e);
 
+  // 2b. Track participant names from transcript speaker labels.
+  if (line.name && !session.seenSpeakers.has(line.name)) {
+    session.seenSpeakers.set(line.name, { side: line.speaker });
+    const now = Date.now();
+    if (now - session.lastParticipantPatchAt > 30_000) {
+      session.lastParticipantPatchAt = now;
+      void patchParticipants(session).catch(() => {});
+    }
+  }
+
   // 3. Hint generation — fires immediately on competitor/comparison signals,
   // or after every HINT_FINAL_BATCH transcripts OR HINT_TIME_MS elapsed.
   session.finalsSinceLastHint += 1;
@@ -304,6 +336,49 @@ async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Pr
   // 5. Auto-note — detect action items from BOTH speakers (rep commitments + client requests)
   if (hasActionItemPattern(line.text) && isGeminiEnabled()) {
     void detectAndWriteActionItem(session, line).catch(() => {});
+  }
+}
+
+const PARTICIPANT_COLORS = ["#EA4335", "#F9AB00", "#1A73E8", "#34A853", "#A142F4", "#E8710A"];
+
+async function patchParticipants(session: ActiveSession): Promise<void> {
+  const participants: Participant[] = [];
+  let i = 0;
+  for (const [name, { side }] of session.seenSpeakers) {
+    const words = name.split(/\s+/);
+    const initials = words.map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 2);
+    participants.push({
+      name,
+      role: "",
+      side,
+      color: PARTICIPANT_COLORS[i % PARTICIPANT_COLORS.length]!,
+      initials: initials || "?",
+    });
+    i++;
+  }
+  await meetingsRepo.patch(session.meetingId, { participants }).catch(() => {});
+}
+
+async function runInfographicTick(session: ActiveSession): Promise<void> {
+  if (session.infographicInFlight) return;
+  const newLines = session.rollingTranscript.length - session.linesAtLastInfographic;
+  if (newLines < INFOGRAPHIC_MIN_LINES) return;
+  session.infographicInFlight = true;
+  try {
+    const ig = await generateInfographic({
+      rollingTranscript: session.rollingTranscript,
+      meetingGoal: session.cachedGoal,
+      meetingTitle: "",
+    });
+    if (ig) {
+      await liveRepo.writeInfographic(session.meetingId, ig);
+      session.linesAtLastInfographic = session.rollingTranscript.length;
+      session.lastInfographicAt = Date.now();
+    }
+  } catch (err) {
+    console.warn(`[audio-session] infographic tick error: ${(err as Error).message}`);
+  } finally {
+    session.infographicInFlight = false;
   }
 }
 

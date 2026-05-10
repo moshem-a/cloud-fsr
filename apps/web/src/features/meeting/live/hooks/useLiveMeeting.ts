@@ -1,4 +1,4 @@
-import type { Hint, SentimentSample, TranscriptLine } from "@scoach/types";
+import type { Hint, Infographic, SentimentSample, TranscriptLine } from "@scoach/types";
 import {
   type DocumentData,
   collection,
@@ -145,6 +145,22 @@ export function useLiveMeeting(meetingId: string): void {
       );
       unsubs.push(unsubLive);
 
+      const addInfographic = useLiveMeetingStore.getState().addInfographic;
+      const unsubInfographics = onSnapshot(
+        query(collection(meetingRef, "infographics"), orderBy("_at", "desc")),
+        (snap) => {
+          for (const change of snap.docChanges()) {
+            if (change.type === "removed") continue;
+            const ig = change.doc.data() as Infographic & DocumentData;
+            addInfographic(ig);
+          }
+        },
+        (err) => {
+          console.warn("[live] infographics listener error", err);
+        },
+      );
+      unsubs.push(unsubInfographics);
+
       const unsubPartial = onSnapshot(
         doc(meetingRef, "live", "partial"),
         (snap) => {
@@ -160,6 +176,12 @@ export function useLiveMeeting(meetingId: string): void {
     } catch (err) {
       console.warn("[live] failed to attach Firestore listeners", err);
       setConnection(false);
+      import("../../../../mocks/fixtures/live-meeting.ts")
+        .then(({ MOCK_INFOGRAPHICS }) => {
+          const store = useLiveMeetingStore.getState();
+          for (const ig of MOCK_INFOGRAPHICS) store.addInfographic(ig);
+        })
+        .catch(() => {});
     }
 
     return () => {

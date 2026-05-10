@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { api } from "../../../../lib/http.ts";
 import { useAuthStore } from "../../../auth/store.ts";
-import { quietAsk, urgentHelp } from "../gemini/quietAsk.ts";
+import { generateClientInfographic, quietAsk, urgentHelp } from "../gemini/quietAsk.ts";
 import { useLiveMeetingStore } from "../store.ts";
 
 export interface QuietBarProps {
@@ -53,19 +53,22 @@ export function QuietBar({ meetingId }: QuietBarProps) {
     const hasKey = !!useAuthStore.getState().geminiKey;
 
     try {
+      let result: QuietAnswer;
       if (hasKey) {
-        const a = await quietAsk(question);
-        setAnswer(a);
+        result = await quietAsk(question);
       } else {
-        // No personal Gemini key set — fall back to a canned demo answer so
-        // the UX still works; surface a hint to set a key.
         await new Promise((r) => setTimeout(r, 600));
-        setAnswer({
+        result = {
           q: question,
           a: "Set your personal Gemini API key in Settings → Gemini API to enable real Quiet Ask. (This canned answer is shown because no key is configured.)",
           chips: ["Settings", "Gemini API key"],
-        });
+        };
       }
+      setAnswer(result);
+      api(`/meetings/${meetingId}/qa`, {
+        method: "POST",
+        body: { q: result.q, a: result.a, chips: result.chips, at: new Date().toISOString(), urgent: false },
+      }).catch(() => {});
     } catch (err) {
       setAnswer({
         q: question,
@@ -93,6 +96,13 @@ export function QuietBar({ meetingId }: QuietBarProps) {
       }
       const a = await urgentHelp(transcript);
       setAnswer(a);
+      api(`/meetings/${meetingId}/qa`, {
+        method: "POST",
+        body: { q: a.q, a: a.a, chips: a.chips, at: new Date().toISOString(), urgent: true },
+      }).catch(() => {});
+      generateClientInfographic(transcript).then((ig) => {
+        if (ig) useLiveMeetingStore.getState().setQuietInfographic(ig);
+      }).catch(() => {});
     } catch (err) {
       setAnswer({
         q: "(urgent help)",

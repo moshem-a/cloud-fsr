@@ -1,5 +1,5 @@
 import { type Content, type GenerativeModel, VertexAI } from "@google-cloud/vertexai";
-import type { ComparisonTable, Hint, HintCategory, HintColor, Sentiment, TranscriptLine } from "@scoach/types";
+import type { ComparisonTable, Hint, HintCategory, HintColor, Infographic, InfographicKind, Sentiment, TranscriptLine } from "@scoach/types";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -295,6 +295,71 @@ function isValidComparison(c: unknown): ComparisonTable | undefined {
     right: { name: o.right.name, points: rightPoints, ...(o.right.verdict ? { verdict: o.right.verdict } : {}) },
     ...(typeof o.recommendation === "string" ? { recommendation: o.recommendation } : {}),
   };
+}
+
+// ---------- Infographic generation ----------
+const INFOGRAPHIC_SYSTEM = `You are a visual infographic generator for a live sales/technical call. Based on the recent conversation, produce a single visual diagram that helps the sales rep understand the discussion at a glance.
+
+Choose the BEST diagram kind for the current topic:
+- "flow": for processes, architecture, data flows (nodes + edges)
+- "timeline": for chronological events, project phases (entries with dates)
+- "comparison": for product comparisons, feature vs feature (columns with items)
+- "steps": for action sequences, migration steps, implementation plans (numbered steps)
+- "gantt": for project timelines with date ranges (tasks with start/end dates)
+
+Return STRICT JSON matching one of these schemas:
+
+For "flow": { "kind": "flow", "title": "...", "data": { "nodes": [{"id":"n1","label":"..."}], "edges": [{"from":"n1","to":"n2","label":"..."}] } }
+For "timeline": { "kind": "timeline", "title": "...", "data": { "entries": [{"label":"...","date":"...","detail":"..."}] } }
+For "comparison": { "kind": "comparison", "title": "...", "data": { "columns": [{"header":"...","items":["...","..."]}] } }
+For "steps": { "kind": "steps", "title": "...", "data": { "steps": [{"title":"...","detail":"..."}] } }
+For "gantt": { "kind": "gantt", "title": "...", "data": { "tasks": [{"name":"...","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}] } }
+
+If the conversation doesn't warrant a new infographic, return: { "skip": true }
+Keep titles short (max 40 chars). Keep data concise — max 6 nodes/entries/steps/tasks.`;
+
+export interface InfographicRequest {
+  rollingTranscript: TranscriptLine[];
+  meetingGoal: string;
+  meetingTitle: string;
+}
+
+export async function generateInfographic(req: InfographicRequest): Promise<Infographic | null> {
+  if (!isGeminiEnabled() || req.rollingTranscript.length < 5) return null;
+  try {
+    const model = vertex().getGenerativeModel({
+      model: MODEL_FLASH,
+      generationConfig: { temperature: 0.4, maxOutputTokens: 2048, responseMimeType: "application/json" },
+      systemInstruction: { role: "system", parts: [{ text: INFOGRAPHIC_SYSTEM }] },
+    });
+    const transcript = req.rollingTranscript
+      .slice(-15)
+      .map((l) => `[${l.t}] ${l.name}: ${l.text}`)
+      .join("\n");
+    const prompt = `Meeting: ${req.meetingTitle}
+Goal: ${req.meetingGoal || "(not specified)"}
+
+Recent transcript:
+${transcript}
+
+Generate the most useful infographic for this conversation right now.`;
+    const raw = await streamToText(model, [{ role: "user", parts: [{ text: prompt }] }]);
+    const cleaned = extractJson(raw);
+    const parsed = JSON.parse(cleaned || "{}") as { skip?: boolean; kind?: string; title?: string; data?: unknown };
+    if (parsed.skip || !parsed.kind || !parsed.title || !parsed.data) return null;
+    const validKinds: InfographicKind[] = ["flow", "timeline", "comparison", "steps", "gantt"];
+    if (!validKinds.includes(parsed.kind as InfographicKind)) return null;
+    return {
+      id: randomUUID(),
+      kind: parsed.kind as InfographicKind,
+      title: parsed.title,
+      data: parsed.data as Infographic["data"],
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    console.warn(`[gemini] generateInfographic failed: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 // ---------- Live tips (periodic coaching advice for the rep) ----------

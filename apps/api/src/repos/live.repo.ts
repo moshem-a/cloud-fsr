@@ -1,4 +1,4 @@
-import type { Hint, RepNote, SentimentSample, TranscriptLine } from "@scoach/types";
+import type { Hint, Infographic, RepNote, SentimentSample, TranscriptLine } from "@scoach/types";
 import { randomUUID } from "node:crypto";
 
 import { getDb, isFirestoreEnabled } from "./firestore.ts";
@@ -100,6 +100,16 @@ export const liveRepo = {
       .set({ ...note, id, _at: Date.now() });
   },
 
+  async writeInfographic(meetingId: string, ig: Infographic): Promise<void> {
+    if (!isFirestoreEnabled()) return;
+    await getDb()
+      .collection("meetings")
+      .doc(meetingId)
+      .collection("infographics")
+      .doc(ig.id)
+      .set({ ...ig, _at: Date.now() });
+  },
+
   async writeTip(meetingId: string, tip: { id: string; text: string; at: number }): Promise<void> {
     if (!isFirestoreEnabled()) return;
     await getDb()
@@ -126,7 +136,7 @@ export const liveRepo = {
   async clearLive(meetingId: string): Promise<void> {
     if (!isFirestoreEnabled()) return;
     const db = getDb();
-    const subs = ["transcript", "hints", "sentiment", "followups", "tips", "autoNotes", "live"];
+    const subs = ["transcript", "hints", "sentiment", "followups", "tips", "autoNotes", "infographics", "live"];
     for (const sub of subs) {
       const snap = await db.collection("meetings").doc(meetingId).collection(sub).get();
       const batch = db.batch();

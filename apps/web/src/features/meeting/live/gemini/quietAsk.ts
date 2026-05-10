@@ -8,7 +8,7 @@
  * Network requests go directly to generativelanguage.googleapis.com.
  */
 
-import type { TranscriptLine } from "@scoach/types";
+import type { Infographic, InfographicKind, TranscriptLine } from "@scoach/types";
 
 import { useAuthStore } from "../../../auth/store.ts";
 
@@ -157,4 +157,56 @@ export async function urgentHelp(transcript: TranscriptLine[]): Promise<QuietAsk
     a: parsed.answer ?? raw ?? "",
     chips: Array.isArray(parsed.chips) ? parsed.chips.slice(0, 4) : [],
   };
+}
+
+const INFOGRAPHIC_SYSTEM = `You are a visual infographic generator for a live sales call. Generate a single diagram that helps the rep understand the current discussion at a glance.
+
+Choose the best kind: "flow" (processes/architecture), "timeline" (chronological events), "comparison" (product comparisons), "steps" (action sequences), "gantt" (project timelines with dates).
+
+Return STRICT JSON:
+For "flow": { "kind": "flow", "title": "...", "data": { "nodes": [{"id":"n1","label":"..."}], "edges": [{"from":"n1","to":"n2","label":"..."}] } }
+For "timeline": { "kind": "timeline", "title": "...", "data": { "entries": [{"label":"...","date":"...","detail":"..."}] } }
+For "comparison": { "kind": "comparison", "title": "...", "data": { "columns": [{"header":"...","items":["...","..."]}] } }
+For "steps": { "kind": "steps", "title": "...", "data": { "steps": [{"title":"...","detail":"..."}] } }
+For "gantt": { "kind": "gantt", "title": "...", "data": { "tasks": [{"name":"...","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}] } }
+
+If nothing warrants a diagram: { "skip": true }. Keep titles short (max 40 chars), max 6 items.`;
+
+export async function generateClientInfographic(transcript: TranscriptLine[]): Promise<Infographic | null> {
+  const key = useAuthStore.getState().geminiKey;
+  if (!key || transcript.length < 3) return null;
+
+  const recent = transcript.slice(-15);
+  const context = recent.map((l) => `[${l.t}] ${l.name}: ${l.text}`).join("\n");
+
+  const body = {
+    systemInstruction: { role: "system", parts: [{ text: INFOGRAPHIC_SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${context}\n\nGenerate the most useful infographic for this conversation.` }] }],
+    generationConfig: { temperature: 0.4, maxOutputTokens: 2048, responseMimeType: "application/json" },
+  };
+
+  try {
+    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as GeminiResponse;
+    if (!res.ok) return null;
+    const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const cleaned = raw.replace(/^```json\s*|\s*```$/g, "").trim();
+    const parsed = JSON.parse(cleaned || "{}") as { skip?: boolean; kind?: string; title?: string; data?: unknown };
+    if (parsed.skip || !parsed.kind || !parsed.title || !parsed.data) return null;
+    const validKinds: InfographicKind[] = ["flow", "timeline", "comparison", "steps", "gantt"];
+    if (!validKinds.includes(parsed.kind as InfographicKind)) return null;
+    return {
+      id: crypto.randomUUID(),
+      kind: parsed.kind as InfographicKind,
+      title: parsed.title,
+      data: parsed.data as Infographic["data"],
+      generatedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
 }

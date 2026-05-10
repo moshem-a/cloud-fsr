@@ -1,6 +1,7 @@
 import type { HexColor, ISO8601, UUID } from "./index.ts";
 
 export type MeetingStage = "Intro" | "Discovery" | "Qualification" | "Negotiation";
+export type MeetingType = "sales" | "upsell" | "technical" | "onboarding" | "review" | "other";
 export type SpeakerSide = "client" | "rep";
 export type LangCode = "en" | "he";
 export type Sentiment = "buying" | "concern" | "positive" | "neutral";
@@ -125,6 +126,14 @@ export interface LiveTip {
   at: number;
 }
 
+export interface QuietAskEntry {
+  q: string;
+  a: string;
+  chips: string[];
+  at: ISO8601;
+  urgent: boolean;
+}
+
 export interface Meeting {
   id: UUID;
   ownerUid: string;
@@ -132,6 +141,7 @@ export interface Meeting {
   title: string;
   goal?: string;
   stage: MeetingStage;
+  meetingType?: MeetingType;
   language: "auto" | LangCode;
   scheduledAt?: ISO8601;
   startedAt?: ISO8601;
@@ -167,14 +177,18 @@ export interface HistoryItem {
   stage: MeetingStage;
   /** Live state — drives whether the row links to /live (resume) or /summary. */
   status?: "draft" | "live" | "ended" | "summarized";
+  meetingType?: MeetingType;
   scheduledAt?: ISO8601;
   score: number;
   sentiment: Sentiment;
   tags: string[];
   hintCount: number;
   actedOn: number;
+  actionItemCount?: number;
+  actionItemDone?: number;
   nextStep?: string;
   avatar: HexColor;
+  participants?: string[];
   sharedBy?: { uid: string; name: string; initials: string; color: HexColor; role?: string };
   sharedAt?: ISO8601;
 }
@@ -214,6 +228,8 @@ export interface InternalSummary {
   hintsActed?: number;
   sentimentDelta?: number;
   sentimentAvg?: number;
+  questionsAsked?: QuietAskEntry[];
+  actedHints?: Hint[];
 }
 
 export interface ClientEmail {
@@ -247,6 +263,31 @@ export interface MeetingSummary {
   references: ReferenceLink[];
   generatedAt: ISO8601;
   generationLatencyMs: number;
+}
+
+export type InfographicKind = "flow" | "timeline" | "comparison" | "steps" | "gantt";
+
+export interface FlowNode { id: string; label: string; }
+export interface FlowEdge { from: string; to: string; label?: string; }
+export interface FlowData { nodes: FlowNode[]; edges: FlowEdge[]; }
+
+export interface TimelineEntry { label: string; date?: string; detail?: string; }
+export interface TimelineData { entries: TimelineEntry[]; }
+
+export interface ComparisonCol { header: string; items: string[]; }
+export interface ComparisonData { columns: ComparisonCol[]; }
+
+export interface StepData { steps: { title: string; detail?: string; }[]; }
+
+export interface GanttTask { name: string; start: string; end: string; }
+export interface GanttData { tasks: GanttTask[]; }
+
+export interface Infographic {
+  id: string;
+  kind: InfographicKind;
+  title: string;
+  data: FlowData | TimelineData | ComparisonData | StepData | GanttData;
+  generatedAt: string;
 }
 
 export type SharePermission = "view" | "comment" | "edit";

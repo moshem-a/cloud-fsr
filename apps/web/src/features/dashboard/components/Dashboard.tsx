@@ -1,14 +1,16 @@
-import type { HistoryItem, TeamMember, UserStatsResponse } from "@scoach/types";
+import type { CoachInsight, HistoryItem, TaskView, TeamMember, UserStatsResponse } from "@scoach/types";
 import { Chev, Inbox, Search, Spark, User as UserIcon } from "@scoach/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
+import { useAuthStore } from "../../auth/store.ts";
+import { tasksApi } from "../../tasks/api.ts";
 import { dashboardApi } from "../api.ts";
 import { DashHeader } from "./DashHeader.tsx";
 import { HistShareBtn } from "./HistShareBtn.tsx";
 import { StatTile } from "./StatTile.tsx";
 
-type Scope = "mine" | "shared";
+type Scope = "mine" | "shared" | "drafts";
 type StageFilter = "all" | "discovery" | "qualification" | "negotiation";
 
 function formatHistoryDate(iso: string): { date: string; time: string } {
@@ -20,6 +22,11 @@ function formatHistoryDate(iso: string): { date: string; time: string } {
 
 export function Dashboard() {
   const nav = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const displayName = useAuthStore((s) => s.displayName);
+  const storeEmail = useAuthStore((s) => s.email);
+  const firstName = (user?.name ?? displayName ?? storeEmail?.split("@")[0] ?? "").split(" ")[0];
+
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StageFilter>("all");
   const [scope, setScope] = useState<Scope>("mine");
@@ -28,6 +35,9 @@ export function Dashboard() {
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [stats, setStats] = useState<UserStatsResponse | null>(null);
   const [creating, setCreating] = useState(false);
+  const [allTasks, setAllTasks] = useState<TaskView[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [insights, setInsights] = useState<CoachInsight[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -36,8 +46,6 @@ export function Dashboard() {
       dashboardApi.fetchStats(),
     ])
       .then(([hist, t, s]) => {
-        // fetch returns scope-filtered already; but since we want both
-        // mine + shared in client to recompute counts, fetch both:
         return Promise.all([
           dashboardApi.fetchHistory({ scope: "mine" }),
           dashboardApi.fetchHistory({ scope: "shared" }),
@@ -51,20 +59,23 @@ export function Dashboard() {
         setTeam(t.items);
         setStats(s);
       })
-      .catch(() => {
-        /* keep loading state */
-      });
+      .catch(() => {});
+
+    tasksApi.list().then((res) => setAllTasks(res.items)).catch(() => {});
+    dashboardApi.fetchInsights().then((items) => setInsights(items)).catch(() => {});
   }, []);
 
   const filtered = useMemo(() => {
     const items = allHistory.filter((m) => {
       const isShared = !!m.sharedBy;
-      if (scope === "mine" && isShared) return false;
+      const isDraft = m.status === "draft";
+      if (scope === "mine" && (isShared || isDraft)) return false;
       if (scope === "shared" && !isShared) return false;
+      if (scope === "drafts" && !isDraft) return false;
       if (filter !== "all" && m.stage.toLowerCase() !== filter) return false;
       if (search) {
         const q = search.toLowerCase();
-        if (!`${m.client} ${m.title} ${m.tags.join(" ")}`.toLowerCase().includes(q)) return false;
+        if (!`${m.client} ${m.title}`.toLowerCase().includes(q)) return false;
       }
       return true;
     });
@@ -73,18 +84,18 @@ export function Dashboard() {
       const bScheduled = b.scheduledAt && new Date(b.scheduledAt) > new Date() ? 1 : 0;
       const aLive = a.status === "live" ? 1 : 0;
       const bLive = b.status === "live" ? 1 : 0;
-      const aDraft = a.status === "draft" ? 1 : 0;
-      const bDraft = b.status === "draft" ? 1 : 0;
-      const aPriority = aLive * 3 + aScheduled * 2 + aDraft;
-      const bPriority = bLive * 3 + bScheduled * 2 + bDraft;
+      const aPriority = aLive * 3 + aScheduled * 2;
+      const bPriority = bLive * 3 + bScheduled * 2;
       if (bPriority !== aPriority) return bPriority - aPriority;
       return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
     return items;
   }, [allHistory, scope, filter, search]);
 
-  const myCount = useMemo(() => allHistory.filter((m) => !m.sharedBy).length, [allHistory]);
+  const myCount = useMemo(() => allHistory.filter((m) => !m.sharedBy && m.status !== "draft").length, [allHistory]);
   const sharedCount = useMemo(() => allHistory.filter((m) => !!m.sharedBy).length, [allHistory]);
+  const draftCount = useMemo(() => allHistory.filter((m) => m.status === "draft").length, [allHistory]);
+  const openTaskCount = useMemo(() => allTasks.filter((t) => !t.done).length, [allTasks]);
 
   const byClient = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -92,13 +103,42 @@ export function Dashboard() {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [allHistory]);
 
+  const tasksByMeeting = useMemo(() => {
+    const map = new Map<string, TaskView[]>();
+    for (const t of allTasks) {
+      const arr = map.get(t.meetingId) ?? [];
+      arr.push(t);
+      map.set(t.meetingId, arr);
+    }
+    return map;
+  }, [allTasks]);
+
+  function toggleTaskDone(task: TaskView) {
+    const next = !task.done;
+    setAllTasks((prev) =>
+      prev.map((t) => (t.taskId === task.taskId ? { ...t, done: next } : t)),
+    );
+    void tasksApi.updateTask(task.taskId, { done: next }).catch(() => {
+      setAllTasks((prev) =>
+        prev.map((t) => (t.taskId === task.taskId ? { ...t, done: !next } : t)),
+      );
+    });
+  }
+
+  function defaultTitle(): string {
+    const d = new Date();
+    const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    return `Meeting — ${date}, ${time}`;
+  }
+
   async function startNew() {
     setCreating(true);
     try {
       const m = await dashboardApi.createMeeting({
         account: { name: "" },
-        title: "Untitled meeting",
-        stage: "Discovery",
+        title: defaultTitle(),
+        stage: "Intro",
       });
       nav({ to: "/meetings/$id/setup", params: { id: m.id } });
     } finally {
@@ -106,16 +146,13 @@ export function Dashboard() {
     }
   }
 
-  // Dev shortcut: skip the setup wizard and jump straight to the live page
-  // with a default-shaped meeting. Same Firestore record as the normal flow,
-  // so history/summary work the same — just no pre-meeting wizard friction.
   async function quickLive() {
     setCreating(true);
     try {
       const m = await dashboardApi.createMeeting({
-        account: { name: "Test meeting" },
-        title: "Quick test",
-        stage: "Discovery",
+        account: { name: "" },
+        title: defaultTitle(),
+        stage: "Intro",
       });
       nav({ to: "/meetings/$id/live", params: { id: m.id } });
     } finally {
@@ -144,11 +181,12 @@ export function Dashboard() {
         {/* Hero / quick start */}
         <section className="dash-hero">
           <div className="dash-hero-text">
-            <div className="kicker">Welcome back, {(stats ? "Noa" : "")}</div>
-            <h1 className="dash-title">3 meetings on the calendar today.</h1>
+            <div className="kicker">Welcome back{firstName ? `, ${firstName}` : ""}</div>
+            <h1 className="dash-title">{stats?.thisWeek.meetings ?? allHistory.length} meetings this week.</h1>
             <p className="dash-sub">
-              Your next call is with <b>Aviv Capital</b> in 18 minutes — board pressure was flagged last call.
-              I've pre-loaded their context.
+              {openTaskCount > 0
+                ? `You have ${openTaskCount} open action item${openTaskCount === 1 ? "" : "s"} across your meetings.`
+                : "All caught up — no open action items."}
             </p>
             <div className="dash-cta-row">
               <button type="button" className="pill-btn primary lg" onClick={startNew} disabled={creating}>
@@ -166,10 +204,10 @@ export function Dashboard() {
             </div>
           </div>
           <div className="dash-hero-stats">
-            <StatTile label="Meetings this week" value={stats?.thisWeek.meetings ?? 12} trend={stats?.trend.meetings != null ? `+${stats.trend.meetings}` : "+3"} color="blue" />
-            <StatTile label="Avg. confidence" value={stats?.thisWeek.avgConfidence != null ? `${Math.round(stats.thisWeek.avgConfidence * 100)}%` : "82%"} trend="+6%" color="green" />
-            <StatTile label="Hints used" value={68} trend={`${stats?.thisWeek.hintsActedPct ?? 74}% rate`} color="yellow" />
-            <StatTile label="Buying signals" value={stats?.thisWeek.buyingSignals ?? 9} trend="↑ Aviv, Monday" color="red" />
+            <StatTile label="Meetings this week" value={stats?.thisWeek.meetings ?? 0} trend={stats?.trend.meetings ? `+${stats.trend.meetings}` : "—"} color="blue" />
+            <StatTile label="Avg. confidence" value={stats?.thisWeek.avgConfidence != null ? `${Math.round(stats.thisWeek.avgConfidence * 100)}%` : "—"} trend="—" color="green" />
+            <StatTile label="Open tasks" value={stats?.thisWeek.openTasks ?? openTaskCount} trend={openTaskCount > 0 ? `${openTaskCount} pending` : "all done"} color="yellow" />
+            <StatTile label="Acted on hints" value={`${stats?.thisWeek.hintsActedPct ?? 0}%`} trend="—" color="red" />
           </div>
         </section>
 
@@ -184,6 +222,9 @@ export function Dashboard() {
                 </button>
                 <button type="button" className={scope === "shared" ? "on" : ""} onClick={() => setScope("shared")}>
                   <Inbox size={12} /> Shared with me <span className="seg-count">{sharedCount}</span>
+                </button>
+                <button type="button" className={scope === "drafts" ? "on" : ""} onClick={() => setScope("drafts")}>
+                  Drafts <span className="seg-count">{draftCount}</span>
                 </button>
               </div>
               <div className="search-box">
@@ -210,123 +251,164 @@ export function Dashboard() {
               <div>Client</div>
               <div>Meeting</div>
               <div>Stage</div>
-              <div>Tags</div>
+              <div>Actions</div>
               <div>Hints</div>
               <div></div>
             </div>
             {filtered.map((m) => {
               const { date, time } = formatHistoryDate(m.date);
+              const meetingTasks = tasksByMeeting.get(m.id) ?? [];
+              const actionCount = m.actionItemCount ?? meetingTasks.length;
+              const isExpanded = expandedId === m.id;
               return (
-                <button
-                  type="button"
-                  key={m.id}
-                  className="hist-row"
-                  onClick={() => openMeeting(m.id, m.status)}
-                >
-                  <div className="hist-date-col">
-                    <div className="hist-date mono">{date}</div>
-                    <div className="hist-time mono">{time} · {m.duration}</div>
-                  </div>
-                  <div className="hist-client">
-                    <div className="hist-avatar" style={{ background: m.avatar }}>
-                      {m.client[0]}
+                <div key={m.id} className="hist-row-group">
+                  <button
+                    type="button"
+                    className="hist-row"
+                    onClick={() => openMeeting(m.id, m.status)}
+                  >
+                    <div className="hist-date-col">
+                      <div className="hist-date mono">{date}</div>
+                      <div className="hist-time mono">{time} · {m.duration}</div>
                     </div>
-                    <div>
-                      <div className="hist-client-name">
-                        {m.client}
-                        {m.sharedBy && (
-                          <span className="shared-badge" title={`Shared by ${m.sharedBy.name}, ${m.sharedAt ?? ""}`}>
-                            ↗ {m.sharedBy.initials}
-                          </span>
+                    <div className="hist-client">
+                      <div className="hist-avatar" style={{ background: m.avatar }}>
+                        {m.client[0]}
+                      </div>
+                      <div>
+                        <div className="hist-client-name">
+                          {m.client}
+                          {m.sharedBy && (
+                            <span className="shared-badge" title={`Shared by ${m.sharedBy.name}, ${m.sharedAt ?? ""}`}>
+                              ↗ {m.sharedBy.initials}
+                            </span>
+                          )}
+                        </div>
+                        {m.participants && m.participants.length > 0 && (
+                          <div className="hist-participants mono">
+                            {m.participants.slice(0, 2).join(", ")}
+                            {m.participants.length > 2 && ` +${m.participants.length - 2}`}
+                          </div>
                         )}
                       </div>
                     </div>
-                  </div>
-                  <div className="hist-title">
-                    {m.title}
-                    {m.status === "live" && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          background: "var(--gc-green-50, #e6f4ea)",
-                          color: "var(--gc-green, #1e8e3e)",
-                        }}
-                      >
-                        ● Live · resume
-                      </span>
-                    )}
-                    {m.scheduledAt && new Date(m.scheduledAt) > new Date() && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          background: "var(--gc-blue-50, #e8f0fe)",
-                          color: "var(--gc-blue, #1a73e8)",
-                        }}
-                      >
-                        Scheduled · {new Date(m.scheduledAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })} {new Date(m.scheduledAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}
-                      </span>
-                    )}
-                    {m.status === "draft" && !(m.scheduledAt && new Date(m.scheduledAt) > new Date()) && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          background: "var(--gc-yellow-50, #fff7e0)",
-                          color: "var(--gc-yellow, #b06000)",
-                        }}
-                      >
-                        Draft
-                      </span>
-                    )}
-                    {m.nextStep && (
-                      <div className="hist-next">
-                        <Chev size={12} /> {m.nextStep}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <span className={`stage-pill stage-${m.stage.toLowerCase()}`}>{m.stage}</span>
-                  </div>
-                  <div className="hist-tags">
-                    {m.tags.slice(0, 2).map((t) => (
-                      <span key={t} className="tag tag-blue">{t}</span>
-                    ))}
-                    {m.tags.length > 2 && <span className="tag-more">+{m.tags.length - 2}</span>}
-                  </div>
-                  <div className="hist-hints mono">
-                    <span style={{ color: "var(--text-1)", fontWeight: 600 }}>{m.actedOn}</span>
-                    <span style={{ color: "var(--text-4)" }}>/{m.hintCount}</span>
-                  </div>
-                  <div className="hist-cta" onClick={(e) => e.stopPropagation()}>
-                    <HistShareBtn meeting={m} team={team} />
-                  </div>
-                </button>
+                    <div className="hist-title">
+                      {m.title}
+                      {m.status === "live" && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            background: "var(--gc-green-50, #e6f4ea)",
+                            color: "var(--gc-green, #1e8e3e)",
+                          }}
+                        >
+                          ● Live · resume
+                        </span>
+                      )}
+                      {m.scheduledAt && new Date(m.scheduledAt) > new Date() && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            background: "var(--gc-blue-50, #e8f0fe)",
+                            color: "var(--gc-blue, #1a73e8)",
+                          }}
+                        >
+                          Scheduled · {new Date(m.scheduledAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })} {new Date(m.scheduledAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                        </span>
+                      )}
+                      {m.status === "draft" && !(m.scheduledAt && new Date(m.scheduledAt) > new Date()) && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            background: "var(--gc-yellow-50, #fff7e0)",
+                            color: "var(--gc-yellow, #b06000)",
+                          }}
+                        >
+                          Draft
+                        </span>
+                      )}
+                      {m.nextStep && (
+                        <div className="hist-next">
+                          <Chev size={12} /> {m.nextStep}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <span className={`stage-pill stage-${m.stage.toLowerCase()}`}>{m.meetingType ? `${m.meetingType[0]!.toUpperCase()}${m.meetingType.slice(1)}` : m.stage}</span>
+                    </div>
+                    <div
+                      className="hist-actions"
+                      onClick={(e) => {
+                        if (actionCount > 0) {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setExpandedId(isExpanded ? null : m.id);
+                        }
+                      }}
+                    >
+                      {actionCount > 0 ? (
+                        <span className="action-badge">
+                          {actionCount}
+                        </span>
+                      ) : (
+                        <span className="action-badge empty">—</span>
+                      )}
+                    </div>
+                    <div className="hist-hints mono">
+                      <span style={{ color: "var(--text-1)", fontWeight: 600 }}>{m.actedOn}</span>
+                      <span style={{ color: "var(--text-4)" }}>/{m.hintCount}</span>
+                    </div>
+                    <div className="hist-cta" onClick={(e) => e.stopPropagation()}>
+                      <HistShareBtn meeting={m} team={team} />
+                    </div>
+                  </button>
+                  {isExpanded && meetingTasks.length > 0 && (
+                    <div className="hist-expand-panel">
+                      <div className="expand-header">Action items — {m.client}</div>
+                      {meetingTasks.map((task) => (
+                        <label key={task.taskId} className={`expand-task${task.done ? " done" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={task.done}
+                            onChange={() => toggleTaskDone(task)}
+                          />
+                          <span className="expand-who">{task.who}</span>
+                          <span className="expand-what">{task.what}</span>
+                          <span className="expand-due mono">{task.due}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
               );
             })}
             {filtered.length === 0 && (
               <div className="hist-empty">
                 <Inbox size={28} />
                 <div className="hist-empty-title">
-                  {scope === "shared" ? "Nothing shared with you yet" : "No meetings match those filters"}
+                  {scope === "shared" ? "Nothing shared with you yet" : scope === "drafts" ? "No draft meetings" : "No meetings match those filters"}
                 </div>
                 <div className="hist-empty-sub">
                   {scope === "shared"
                     ? "When teammates share a meeting with you, it'll show up here."
-                    : "Try clearing the search or stage filter."}
+                    : scope === "drafts"
+                      ? "Meetings you start but haven't begun will appear here."
+                      : "Try clearing the search or stage filter."}
                 </div>
               </div>
             )}
@@ -363,47 +445,27 @@ export function Dashboard() {
               </div>
             </div>
             <ul className="insight-list">
-              <li>
-                <div className="ins-icon" style={{ background: "var(--gc-green-50)", color: "var(--gc-green)" }}>↑</div>
-                <div>
-                  <b>Your follow-up rate is up 18%</b> this week. Hint-acted-upon ratio is best in your team.
-                </div>
-              </li>
-              <li>
-                <div className="ins-icon" style={{ background: "var(--gc-yellow-50)", color: "#B86E00" }}>!</div>
-                <div>
-                  <b>3 meetings missed buying-signal flags.</b> Tap into sentiment events earlier.
-                </div>
-              </li>
-              <li>
-                <div className="ins-icon" style={{ background: "var(--gc-blue-50)", color: "var(--gc-blue)" }}>i</div>
-                <div>
-                  <b>Bedrock came up in 7 calls</b> this month. Consider scheduling a deep-dive on Model Garden positioning.
-                </div>
-              </li>
-            </ul>
-          </section>
-
-          <section className="card">
-            <div className="card-head">
-              <div className="card-title">
-                <UserIcon size={16} /> Team activity
-              </div>
-            </div>
-            <ul className="people">
-              {team.slice(0, 4).map((p) => (
-                <li key={p.uid}>
-                  <div className="ppl-avatar" style={{ background: p.color }}>{p.initials}</div>
-                  <div className="ppl-info">
-                    <div className="ppl-name">
-                      {p.name}
-                      {p.uid === "u-noa" && <span className="you-badge">YOU</span>}
+              {insights.length > 0 ? insights.map((ins, i) => {
+                const iconStyle = ins.icon === "up"
+                  ? { background: "var(--gc-green-50)", color: "var(--gc-green)" }
+                  : ins.icon === "warn"
+                    ? { background: "var(--gc-yellow-50)", color: "#B86E00" }
+                    : { background: "var(--gc-blue-50)", color: "var(--gc-blue)" };
+                const iconChar = ins.icon === "up" ? "↑" : ins.icon === "warn" ? "!" : "i";
+                return (
+                  <li key={i}>
+                    <div className="ins-icon" style={iconStyle}>{iconChar}</div>
+                    <div>
+                      <b>{ins.title}</b> {ins.detail}
                     </div>
-                    <div className="ppl-role">{p.role}</div>
-                  </div>
-                  <span className="dot" style={{ background: "var(--gc-green)" }} />
+                  </li>
+                );
+              }) : (
+                <li>
+                  <div className="ins-icon" style={{ background: "var(--gc-blue-50)", color: "var(--gc-blue)" }}>i</div>
+                  <div>Complete a few meetings to see personalized insights here.</div>
                 </li>
-              ))}
+              )}
             </ul>
           </section>
         </aside>

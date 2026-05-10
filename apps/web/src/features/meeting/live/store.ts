@@ -1,5 +1,6 @@
 import type {
   Hint,
+  Infographic,
   RepNote,
   SentimentEvent,
   SentimentSample,
@@ -44,6 +45,11 @@ export interface LiveMeetingState {
   notes: RepNote[];
   liveTips: { id: string; text: string; at: number }[];
 
+  infographics: Infographic[];
+  rightPanelTab: "infographics" | "transcript";
+  quietInfographic: Infographic | null;
+  activeInfographicIndex: number;
+
   // setters
   reset: () => void;
   setConnection: (connected: boolean) => void;
@@ -62,6 +68,11 @@ export interface LiveMeetingState {
   setNotes: (notes: RepNote[]) => void;
   updateNote: (index: number, text: string) => void;
   deleteNote: (index: number) => void;
+  addInfographic: (ig: Infographic) => void;
+  setInfographics: (igs: Infographic[]) => void;
+  setRightPanelTab: (tab: "infographics" | "transcript") => void;
+  setQuietInfographic: (ig: Infographic | null) => void;
+  setActiveInfographicIndex: (i: number) => void;
 }
 
 export const useLiveMeetingStore = create<LiveMeetingState>()(
@@ -87,6 +98,10 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     pinnedHintIds: new Set<string>(),
     notes: [],
     liveTips: [],
+    infographics: [],
+    rightPanelTab: "infographics",
+    quietInfographic: null,
+    activeInfographicIndex: 0,
 
     reset: () =>
       set({
@@ -110,6 +125,10 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         pinnedHintIds: new Set<string>(),
         notes: [],
         liveTips: [],
+        infographics: [],
+        rightPanelTab: "infographics",
+        quietInfographic: null,
+        activeInfographicIndex: 0,
       }),
     setConnection: (connected) => set({ connected }),
     setListening: (listening) => set({ listening }),
@@ -201,5 +220,14 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         const next = s.notes.filter((_, i) => i !== index);
         return { notes: next };
       }),
+    addInfographic: (ig) =>
+      set((s) => {
+        if (s.infographics.some((x) => x.id === ig.id)) return {};
+        return { infographics: [ig, ...s.infographics].slice(0, 20), activeInfographicIndex: 0 };
+      }),
+    setInfographics: (infographics) => set({ infographics, activeInfographicIndex: 0 }),
+    setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
+    setQuietInfographic: (quietInfographic) => set({ quietInfographic }),
+    setActiveInfographicIndex: (activeInfographicIndex) => set({ activeInfographicIndex }),
   })),
 );

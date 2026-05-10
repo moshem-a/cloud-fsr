@@ -1,6 +1,7 @@
 import type { HistoryItem, Meeting, MeetingStage } from "@scoach/types";
 
 import { getDb, isFirestoreEnabled } from "./firestore.ts";
+import { summaryRepo } from "./summary.repo.ts";
 
 const COLLECTION = "meetings";
 
@@ -70,7 +71,19 @@ export const meetingsRepo = {
           m.title.toLowerCase().includes(q),
       );
     }
-    return filtered.map(meetingToHistoryItem);
+    const items = filtered.map(meetingToHistoryItem);
+    await Promise.all(
+      items.map(async (item) => {
+        try {
+          const summary = await summaryRepo.get(item.id);
+          if (summary?.internal?.actionItems) {
+            item.actionItemCount = summary.internal.actionItems.length;
+            item.actionItemDone = summary.internal.actionItems.filter((a) => a.done).length;
+          }
+        } catch {}
+      }),
+    );
+    return items;
   },
 };
 
@@ -85,10 +98,12 @@ function meetingToHistoryItem(m: Meeting): HistoryItem {
       : "—",
     rep: "Unknown",
     stage: m.stage,
+    meetingType: m.meetingType,
     status: m.status,
     score: 0,
     sentiment: "neutral",
     tags: [],
+    participants: m.participants.map((p) => p.name),
     hintCount: 0,
     actedOn: 0,
     avatar: "#5F6368",
