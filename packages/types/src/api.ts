@@ -50,8 +50,18 @@ export interface UserStatsResponse {
     hintsActedPct: number;
     avgConfidence?: number;
     buyingSignals?: number;
+    openTasks?: number;
   };
   trend: { meetings: number; minutes: number; hintsActedPct: number };
+}
+
+export interface CoachInsight {
+  icon: "up" | "warn" | "info";
+  title: string;
+  detail: string;
+}
+export interface CoachInsightsResponse {
+  items: CoachInsight[];
 }
 
 // ---------- Meetings ----------
@@ -149,7 +159,10 @@ export interface ListTasksResponse {
   items: TaskView[];
 }
 export interface UpdateTaskRequest {
-  done: boolean;
+  done?: boolean;
+  who?: string;
+  what?: string;
+  due?: string;
 }
 export type UpdateTaskResponse = TaskView;
 

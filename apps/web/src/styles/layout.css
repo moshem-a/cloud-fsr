@@ -834,5 +834,7 @@
   color: var(--gc-red, #b00020);
   margin-right: 4px;
 }
-.ig-card-body { padding: 8px; }
+.ig-card-body { padding: 8px; overflow: hidden; }
 .ig-svg { width: 100%; height: auto; max-height: 280px; }
+.mermaid-container { width: 100%; overflow-x: auto; }
+.mermaid-container svg { max-width: 100%; height: auto; }

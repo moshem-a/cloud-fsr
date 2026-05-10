@@ -10,6 +10,7 @@ export interface AuthState {
   /** Firebase user info we care about. Persisted so reloads don't sign-out. */
   firebaseUid: string | null;
   email: string | null;
+  displayName: string | null;
   /** Server profile (from /users/me). NOT persisted — refetched on reload. */
   user: User | null;
   /** User's Gemini API key (browser-local; only used for Quiet Ask). Persisted. */
@@ -17,7 +18,7 @@ export interface AuthState {
   /** Google OAuth access token for Calendar API. Persisted. */
   googleAccessToken: string | null;
 
-  setFirebaseUser: (uid: string | null, email: string | null) => void;
+  setFirebaseUser: (uid: string | null, email: string | null, displayName?: string | null) => void;
   setUser: (user: User | null) => void;
   setGeminiKey: (key: string | null) => void;
   setGoogleAccessToken: (token: string | null) => void;
@@ -32,12 +33,13 @@ export const useAuthStore = create<AuthState>()(
       initialized: false,
       firebaseUid: null,
       email: null,
+      displayName: null,
       user: null,
       geminiKey: null,
       googleAccessToken: null,
 
-      setFirebaseUser: (uid, email) =>
-        set({ firebaseUid: uid, email, initialized: true }),
+      setFirebaseUser: (uid, email, displayName) =>
+        set({ firebaseUid: uid, email, displayName: displayName ?? null, initialized: true }),
       setUser: (user) => set({ user }),
       setGeminiKey: (key) => set({ geminiKey: key }),
       setGoogleAccessToken: (token) => set({ googleAccessToken: token }),
@@ -45,6 +47,7 @@ export const useAuthStore = create<AuthState>()(
         set({
           firebaseUid: null,
           email: null,
+          displayName: null,
           user: null,
           googleAccessToken: null,
           initialized: true,
@@ -57,6 +60,7 @@ export const useAuthStore = create<AuthState>()(
       partialize: (s) => ({
         firebaseUid: s.firebaseUid,
         email: s.email,
+        displayName: s.displayName,
         geminiKey: s.geminiKey,
         googleAccessToken: s.googleAccessToken,
       }),
@@ -77,7 +81,7 @@ export const useAuthStore = create<AuthState>()(
 export function bootstrapAuth(): () => void {
   try {
     return onAuthChange((u) => {
-      useAuthStore.getState().setFirebaseUser(u?.uid ?? null, u?.email ?? null);
+      useAuthStore.getState().setFirebaseUser(u?.uid ?? null, u?.email ?? null, u?.displayName ?? null);
     });
   } catch {
     // No Firebase config available — keep whatever's persisted, just mark

@@ -9,6 +9,7 @@ export interface AuthenticatedUser {
   uid: string;
   email: string;
   emailVerified: boolean;
+  name?: string;
 }
 
 declare module "fastify" {
@@ -68,7 +69,7 @@ export async function registerAuth(app: FastifyInstance, config: Config) {
             .join(" or ")} accounts`,
         });
       }
-      req.user = { uid: decoded.uid, email, emailVerified: decoded.email_verified };
+      req.user = { uid: decoded.uid, email, emailVerified: decoded.email_verified, name: decoded.name as string | undefined };
     } catch (err) {
       app.log.warn({ err }, "token verification failed");
       return reply.code(401).send({ code: "unauthenticated", message: "Invalid token" });

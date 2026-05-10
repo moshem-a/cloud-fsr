@@ -287,6 +287,7 @@ export interface Infographic {
   kind: InfographicKind;
   title: string;
   data: FlowData | TimelineData | ComparisonData | StepData | GanttData;
+  mermaid?: string;
   generatedAt: string;
 }
 

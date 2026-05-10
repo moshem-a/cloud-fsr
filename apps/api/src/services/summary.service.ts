@@ -8,6 +8,7 @@ import type {
 } from "@scoach/types";
 import { randomUUID } from "node:crypto";
 
+import type { MeetingType } from "@scoach/types";
 import { isGeminiEnabled } from "./gemini.service.ts";
 
 const PROJECT = process.env.GCP_PROJECT_ID;
@@ -173,12 +174,13 @@ export async function generateMeetingSummary(
   const startedAt = Date.now();
   const fallback = !isGeminiEnabled() || transcript.length === 0;
 
-  const internal: InternalSummary = fallback
-    ? defaultInternal()
-    : await generateInternalSummary(meeting, transcript).catch(() => defaultInternal());
+  const [internal, client] = fallback
+    ? [defaultInternal(), defaultClient(meeting)]
+    : await Promise.all([
+        generateInternalSummary(meeting, transcript).catch(() => defaultInternal()),
+        generateClientEmail(meeting, transcript, "warm").catch(() => defaultClient(meeting)),
+      ]);
 
-  // Overlay real hint/sentiment stats from Firestore so the summary shows
-  // actual data instead of model-hallucinated numbers.
   if (extras?.hintStats) {
     internal.hintsSurfaced = extras.hintStats.total;
     internal.hintsActed = extras.hintStats.acted;
@@ -190,10 +192,6 @@ export async function generateMeetingSummary(
     internal.sentimentDelta = last - first;
     internal.sentimentAvg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
   }
-
-  const client: ClientEmail = fallback
-    ? defaultClient(meeting)
-    : await generateClientEmail(meeting, transcript, "warm").catch(() => defaultClient(meeting));
 
   return {
     meetingId: meeting.id,
@@ -240,6 +238,23 @@ export function defaultClient(meeting: Meeting): ClientEmail {
     signoff: "Best,",
     tone: "warm",
   };
+}
+
+export function classifyMeetingType(internal: InternalSummary, meeting: Meeting): MeetingType {
+  const text = [
+    ...internal.wentWell,
+    ...internal.couldImprove,
+    ...internal.topMoments.map((m) => m.quote),
+    meeting.title,
+    meeting.goal ?? "",
+  ].join(" ").toLowerCase();
+
+  if (internal.upsell.length > 0 || /upsell|expand|additional|upgrade/i.test(text)) return "upsell";
+  if (/onboard|kickoff|kick-off|implementation|getting started/i.test(text)) return "onboarding";
+  if (/review|qbr|quarterly|check.?in|status update/i.test(text)) return "review";
+  if (/architect|technical|deep.?dive|migration|integration|poc|proof of concept|benchmark/i.test(text)) return "technical";
+  if (/discovery|qualification|pricing|proposal|negotiat|deal|pipeline|sales|opportunity/i.test(text)) return "sales";
+  return "other";
 }
 
 function defaultReferences(): import("@scoach/types").ReferenceLink[] {

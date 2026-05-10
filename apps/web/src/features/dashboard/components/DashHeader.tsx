@@ -32,10 +32,13 @@ export function DashHeader({ onStartNew }: DashHeaderProps) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  const initials = user?.initials ?? "NL";
+  const displayName = useAuthStore((s) => s.displayName);
+  const storeEmail = useAuthStore((s) => s.email);
+  const fallbackName = displayName ?? storeEmail?.split("@")[0] ?? "";
+  const initials = user?.initials ?? (fallbackName.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?");
   const color = user?.color ?? "#1A73E8";
-  const name = user?.name ?? "Noa Levi";
-  const email = user?.email ?? "noalevi@google.com";
+  const name = user?.name ?? fallbackName;
+  const email = user?.email ?? storeEmail ?? "";
 
   async function handleSignOut() {
     setOpen(false);

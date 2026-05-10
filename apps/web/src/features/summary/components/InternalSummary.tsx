@@ -1,5 +1,5 @@
 import type { ActionItem, MeetingSummary } from "@scoach/types";
-import { Alert, Check, Close, Trend } from "@scoach/ui/icons";
+import { Alert, Check, Chev, Close, Trend } from "@scoach/ui/icons";
 import { useState } from "react";
 
 import { summaryApi } from "../api.ts";
@@ -19,6 +19,8 @@ export function InternalSummary({
   const [newWho, setNewWho] = useState("");
   const [newWhat, setNewWhat] = useState("");
   const [newDue, setNewDue] = useState("");
+  const [wellOpen, setWellOpen] = useState(false);
+  const [improveOpen, setImproveOpen] = useState(false);
 
   function persist(next: ActionItem[]) {
     setItems(next);
@@ -99,53 +101,71 @@ export function InternalSummary({
               )}
             </div>
             <div className="glance-tile">
-              <div className="glance-label">Hints surfaced</div>
-              <div className="glance-val">
-                {s.hintsSurfaced ?? 0}
-                {(s.hintsActed ?? 0) > 0 && <span> · {s.hintsActed} used</span>}
+              <div className="glance-label">Key topics</div>
+              <div className="glance-val" style={{ fontSize: 16 }}>
+                {s.topMoments.length > 0
+                  ? [...new Set(s.topMoments.map((m) => m.type))].slice(0, 3).join(", ")
+                  : "—"}
               </div>
-              {(s.hintsSurfaced ?? 0) > 0 && (
-                <div className="glance-foot">
-                  {Math.round(((s.hintsActed ?? 0) / (s.hintsSurfaced ?? 1)) * 100)}% acted-on rate
-                </div>
+              {s.topMoments.length > 0 && (
+                <div className="glance-foot">{s.topMoments.length} key moment{s.topMoments.length !== 1 ? "s" : ""}</div>
               )}
             </div>
             <div className="glance-tile">
-              <div className="glance-label">Sentiment arc</div>
-              <div className="glance-val">
-                <Trend size={20} /> {s.sentimentDelta != null ? (s.sentimentDelta >= 0 ? `+${s.sentimentDelta}` : String(s.sentimentDelta)) : "—"}
+              <div className="glance-label">Open tasks</div>
+              <div className="glance-val" style={{ color: items.filter((a) => !a.done).length > 0 ? "var(--gc-yellow)" : "var(--gc-green)" }}>
+                {items.filter((a) => !a.done).length}
+                <span>/{items.length}</span>
               </div>
-              {s.sentimentAvg != null && (
-                <div className="glance-foot">Avg engagement: {s.sentimentAvg}/100</div>
-              )}
+              <div className="glance-foot">
+                {items.filter((a) => a.done).length} completed
+              </div>
             </div>
           </div>
         </section>
 
         <section className="sum-card">
-          <div className="sum-card-head">
+          <div className="sum-card-head" style={{ cursor: "pointer" }} onClick={() => setWellOpen(!wellOpen)}>
             <h3 className="sum-h3">
               <span className="dot" style={{ background: "var(--gc-green)" }} /> What went well
+              <span className="sum-meta" style={{ marginLeft: 8, fontWeight: 400 }}>{s.wentWell.length}</span>
             </h3>
+            <Chev size={14} style={{ transform: wellOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }} />
           </div>
-          <ul className="sum-list">
-            {s.wentWell.map((x, i) => (
-              <li key={i}>{x}</li>
-            ))}
-          </ul>
+          {s.wentWell.length > 0 && (
+            <div style={{ padding: "0 16px 12px", fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>
+              {s.wentWell[0]}
+            </div>
+          )}
+          {wellOpen && s.wentWell.length > 1 && (
+            <ul className="sum-list">
+              {s.wentWell.slice(1).map((x, i) => (
+                <li key={i}>{x}</li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="sum-card">
-          <div className="sum-card-head">
+          <div className="sum-card-head" style={{ cursor: "pointer" }} onClick={() => setImproveOpen(!improveOpen)}>
             <h3 className="sum-h3">
               <span className="dot" style={{ background: "var(--gc-yellow)" }} /> Where to push deeper
+              <span className="sum-meta" style={{ marginLeft: 8, fontWeight: 400 }}>{s.couldImprove.length}</span>
             </h3>
+            <Chev size={14} style={{ transform: improveOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }} />
           </div>
-          <ul className="sum-list">
-            {s.couldImprove.map((x, i) => (
-              <li key={i}>{x}</li>
-            ))}
-          </ul>
+          {s.couldImprove.length > 0 && (
+            <div style={{ padding: "0 16px 12px", fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>
+              {s.couldImprove[0]}
+            </div>
+          )}
+          {improveOpen && s.couldImprove.length > 1 && (
+            <ul className="sum-list">
+              {s.couldImprove.slice(1).map((x, i) => (
+                <li key={i}>{x}</li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="sum-card">
@@ -307,21 +327,75 @@ export function InternalSummary({
         <section className="sum-card">
           <div className="sum-card-head">
             <h3 className="sum-h3">Top moments</h3>
+            <span className="sum-meta">{s.topMoments.length} detected</span>
           </div>
-          <ol className="moment-list">
-            {s.topMoments.length === 0 && (
-              <li style={{ color: "var(--text-4)" }}>No key moments detected in this call.</li>
-            )}
-            {s.topMoments.map((m, i) => (
-              <li key={i}>
-                <span className="mono">{m.t}</span>
-                <div>
-                  <b>{m.type}</b> — {m.quote}
-                </div>
-              </li>
-            ))}
-          </ol>
+          {s.topMoments.length === 0 ? (
+            <div style={{ padding: "12px 16px", color: "var(--text-4)", fontSize: 13 }}>No key moments detected in this call.</div>
+          ) : (
+            <div className="moment-timeline">
+              {s.topMoments.map((m, i) => {
+                const typeColor = m.type.toLowerCase().includes("objection") || m.type.toLowerCase().includes("risk")
+                  ? "var(--gc-red)"
+                  : m.type.toLowerCase().includes("positive") || m.type.toLowerCase().includes("agreement")
+                    ? "var(--gc-green)"
+                    : m.type.toLowerCase().includes("question")
+                      ? "var(--gc-yellow)"
+                      : "var(--gc-blue)";
+                return (
+                  <div key={i} className="moment-item">
+                    <div className="moment-rail">
+                      <div className="moment-dot" style={{ background: typeColor }} />
+                      {i < s.topMoments.length - 1 && <div className="moment-line" />}
+                    </div>
+                    <div className="moment-content">
+                      <div className="moment-head">
+                        <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{m.t}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: typeColor, marginLeft: 8 }}>{m.type}</span>
+                      </div>
+                      <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 2 }}>"{m.quote}"</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
+
+        {s.questionsAsked && s.questionsAsked.length > 0 && (
+          <section className="sum-card">
+            <div className="sum-card-head">
+              <h3 className="sum-h3">Questions asked</h3>
+              <span className="sum-meta">{s.questionsAsked.length} Q&A</span>
+            </div>
+            <ul className="sum-list">
+              {s.questionsAsked.map((qa, i) => (
+                <li key={i} style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                    {qa.urgent && <span style={{ color: "var(--gc-red)", marginRight: 6, fontSize: 11, fontWeight: 700 }}>URGENT</span>}
+                    Q: {qa.q}
+                  </div>
+                  <div style={{ color: "var(--text-2)", fontSize: 13 }}>{qa.a}</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {s.actedHints && s.actedHints.length > 0 && (
+          <section className="sum-card">
+            <div className="sum-card-head">
+              <h3 className="sum-h3">Hints you used</h3>
+              <span className="sum-meta">{s.actedHints.length} acted on</span>
+            </div>
+            <ul className="sum-list">
+              {s.actedHints.map((h, i) => (
+                <li key={i}>
+                  <b>{h.title}</b> — {h.summary}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </aside>
     </div>
   );

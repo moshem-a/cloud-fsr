@@ -52,6 +52,7 @@ export interface UserSettings {
   hintPace: HintPace;
   autoSummary: boolean;
   quietByDefault: boolean;
+  keepTranscript?: boolean;
 }
 
 export interface User extends UserProfile {

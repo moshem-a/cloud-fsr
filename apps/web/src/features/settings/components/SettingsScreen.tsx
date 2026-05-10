@@ -266,6 +266,7 @@ export function SettingsScreen() {
   const [hintPace, setHintPace] = useState<HintPace>(user?.settings.hintPace ?? "balanced");
   const [autoSummary, setAutoSummary] = useState(user?.settings.autoSummary ?? true);
   const [quietByDefault, setQuietByDefault] = useState(user?.settings.quietByDefault ?? false);
+  const [keepTranscript, setKeepTranscript] = useState(user?.settings.keepTranscript !== false);
   const [saving, setSaving] = useState(false);
 
   function setLanguage(lang: UserLanguage) {
@@ -296,6 +297,7 @@ export function SettingsScreen() {
               hintPace,
               autoSummary,
               quietByDefault,
+              keepTranscript,
             },
           }
         : null;
@@ -498,6 +500,19 @@ export function SettingsScreen() {
                   <div className="toggle-row-sub">{t(language, "quietModeDesc")}</div>
                 </div>
                 <div className={`toggle ${quietByDefault ? "on" : ""}`}>
+                  <div className="toggle-knob" />
+                </div>
+              </div>
+              <div className="toggle-row" onClick={() => setKeepTranscript(!keepTranscript)}>
+                <div>
+                  <div className="toggle-row-title">Keep meeting transcripts</div>
+                  <div className="toggle-row-sub">
+                    {keepTranscript
+                      ? "Transcripts are kept after summary generation. You can delete them manually from each meeting."
+                      : "Transcripts are auto-deleted after summary generation. Summaries are always kept."}
+                  </div>
+                </div>
+                <div className={`toggle ${keepTranscript ? "on" : ""}`}>
                   <div className="toggle-knob" />
                 </div>
               </div>

@@ -25,18 +25,37 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
 
   useEffect(() => {
     let cancelled = false;
-    summaryApi
-      .fetchSummary(meetingId)
-      .then((s) => {
+    let pollTimer: ReturnType<typeof setTimeout>;
+
+    async function load() {
+      try {
+        const s = await summaryApi.fetchSummary(meetingId);
         if (!cancelled) setSummary(s);
-      })
-      .catch((err) => {
-        if (!cancelled) toast.push({ tone: "error", message: (err as Error).message });
-      });
+      } catch {
+        try {
+          await summaryApi.triggerSummarize(meetingId);
+        } catch {}
+        const poll = () => {
+          if (cancelled) return;
+          pollTimer = setTimeout(async () => {
+            try {
+              const s = await summaryApi.fetchSummary(meetingId);
+              if (!cancelled) setSummary(s);
+            } catch {
+              poll();
+            }
+          }, 3000);
+        };
+        poll();
+      }
+    }
+
+    load();
     return () => {
       cancelled = true;
+      clearTimeout(pollTimer);
     };
-  }, [meetingId, toast]);
+  }, [meetingId]);
 
   async function exportPdf() {
     try {

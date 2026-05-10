@@ -2,6 +2,7 @@ import type { Hint } from "@scoach/types";
 import { Check, Copy, Doc, Pin, Spark, ThumbDn, ThumbUp } from "@scoach/ui/icons";
 import { type CSSProperties, useState } from "react";
 
+import { api } from "../../../../lib/http.ts";
 import { useLiveMeetingStore } from "../store.ts";
 
 export interface HintCardProps {
@@ -28,8 +29,10 @@ export function HintCard({ hint, meetingId, style }: HintCardProps) {
 
   function handleAct() {
     markActed(hint.id);
-    // Future: POST /meetings/:id/hints/:hintId/feedback for ranking signal.
-    void meetingId;
+    api(`/meetings/${meetingId}/hints/${hint.id}/feedback`, {
+      method: "POST",
+      body: { actedOn: true },
+    }).catch(() => {});
   }
   function handleNotRelevant() {
     void meetingId;

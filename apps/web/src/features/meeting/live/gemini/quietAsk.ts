@@ -159,18 +159,18 @@ export async function urgentHelp(transcript: TranscriptLine[]): Promise<QuietAsk
   };
 }
 
-const INFOGRAPHIC_SYSTEM = `You are a visual infographic generator for a live sales call. Generate a single diagram that helps the rep understand the current discussion at a glance.
+const INFOGRAPHIC_SYSTEM = `You are a real-time Mermaid chart generator for a live sales call. ALWAYS produce a chart — never skip.
 
-Choose the best kind: "flow" (processes/architecture), "timeline" (chronological events), "comparison" (product comparisons), "steps" (action sequences), "gantt" (project timelines with dates).
+Pick the best Mermaid diagram type:
+- flowchart TD: architecture, processes, decision trees (use most often)
+- graph LR: horizontal flows, pipelines, migration paths
+- pie: cost breakdowns, usage distribution
+- sequenceDiagram: interactions between systems
 
 Return STRICT JSON:
-For "flow": { "kind": "flow", "title": "...", "data": { "nodes": [{"id":"n1","label":"..."}], "edges": [{"from":"n1","to":"n2","label":"..."}] } }
-For "timeline": { "kind": "timeline", "title": "...", "data": { "entries": [{"label":"...","date":"...","detail":"..."}] } }
-For "comparison": { "kind": "comparison", "title": "...", "data": { "columns": [{"header":"...","items":["...","..."]}] } }
-For "steps": { "kind": "steps", "title": "...", "data": { "steps": [{"title":"...","detail":"..."}] } }
-For "gantt": { "kind": "gantt", "title": "...", "data": { "tasks": [{"name":"...","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}] } }
+{ "kind": "flow", "title": "<short title>", "mermaid": "<valid mermaid syntax>" }
 
-If nothing warrants a diagram: { "skip": true }. Keep titles short (max 40 chars), max 6 items.`;
+Keep charts simple: 4-8 nodes, short labels (max 20 chars). Match conversation language.`;
 
 export async function generateClientInfographic(transcript: TranscriptLine[]): Promise<Infographic | null> {
   const key = useAuthStore.getState().geminiKey;
@@ -181,8 +181,8 @@ export async function generateClientInfographic(transcript: TranscriptLine[]): P
 
   const body = {
     systemInstruction: { role: "system", parts: [{ text: INFOGRAPHIC_SYSTEM }] },
-    contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${context}\n\nGenerate the most useful infographic for this conversation.` }] }],
-    generationConfig: { temperature: 0.4, maxOutputTokens: 2048, responseMimeType: "application/json" },
+    contents: [{ role: "user", parts: [{ text: `Recent transcript:\n${context}\n\nGenerate a Mermaid chart for this conversation.` }] }],
+    generationConfig: { temperature: 0.4, maxOutputTokens: 1024, responseMimeType: "application/json" },
   };
 
   try {
@@ -195,15 +195,14 @@ export async function generateClientInfographic(transcript: TranscriptLine[]): P
     if (!res.ok) return null;
     const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     const cleaned = raw.replace(/^```json\s*|\s*```$/g, "").trim();
-    const parsed = JSON.parse(cleaned || "{}") as { skip?: boolean; kind?: string; title?: string; data?: unknown };
-    if (parsed.skip || !parsed.kind || !parsed.title || !parsed.data) return null;
-    const validKinds: InfographicKind[] = ["flow", "timeline", "comparison", "steps", "gantt"];
-    if (!validKinds.includes(parsed.kind as InfographicKind)) return null;
+    const parsed = JSON.parse(cleaned || "{}") as { kind?: string; title?: string; mermaid?: string };
+    if (!parsed.title || !parsed.mermaid) return null;
     return {
       id: crypto.randomUUID(),
-      kind: parsed.kind as InfographicKind,
+      kind: (parsed.kind as InfographicKind) || "flow",
       title: parsed.title,
-      data: parsed.data as Infographic["data"],
+      data: { nodes: [], edges: [] },
+      mermaid: parsed.mermaid,
       generatedAt: new Date().toISOString(),
     };
   } catch {

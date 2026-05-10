@@ -16,7 +16,7 @@ import { getDb, isFirestoreEnabled } from "../repos/firestore.ts";
 import { meetingsRepo } from "../repos/meetings.repo.ts";
 import { summaryRepo } from "../repos/summary.repo.ts";
 import { renderSummaryPdf } from "../services/pdf.service.ts";
-import { defaultClient, generateClientEmail, generateMeetingSummary } from "../services/summary.service.ts";
+import { classifyMeetingType, defaultClient, generateClientEmail, generateMeetingSummary } from "../services/summary.service.ts";
 
 /**
  * In-memory cache to avoid hitting Firestore on every read. Authoritative
@@ -55,13 +55,19 @@ export async function registerSummaryRoutes(app: FastifyInstance) {
       if (!m || m.ownerUid !== req.user!.uid) {
         return reply.code(404).send({ jobId: "", status: "done" } as SummarizeResponse);
       }
-      const [transcript, hintStats, sentimentData] = await Promise.all([
+      const [transcript, hintStats, sentimentData, qaHistory, actedHintDocs] = await Promise.all([
         loadTranscript(req.params.id),
         loadHintStats(req.params.id),
         loadSentimentSeries(req.params.id),
+        loadQAHistory(req.params.id),
+        loadActedHints(req.params.id),
       ]);
       const summary = await generateMeetingSummary(m, transcript, { hintStats, sentimentData });
+      if (qaHistory.length > 0) summary.internal.questionsAsked = qaHistory;
+      if (actedHintDocs.length > 0) summary.internal.actedHints = actedHintDocs;
       await persistSummary(req.params.id, summary);
+      const meetingType = classifyMeetingType(summary.internal, m);
+      await meetingsRepo.patch(req.params.id, { meetingType }).catch(() => {});
       return reply.code(202).send({ jobId: `sum-${Date.now()}`, status: "done" });
     },
   );
@@ -73,15 +79,9 @@ export async function registerSummaryRoutes(app: FastifyInstance) {
       if (!m || m.ownerUid !== req.user!.uid) {
         return reply.code(404).send({} as MeetingSummary);
       }
-      let summary = await getOrLoadSummary(req.params.id);
+      const summary = await getOrLoadSummary(req.params.id);
       if (!summary) {
-        const [transcript, hintStats, sentimentData] = await Promise.all([
-          loadTranscript(req.params.id),
-          loadHintStats(req.params.id),
-          loadSentimentSeries(req.params.id),
-        ]);
-        summary = await generateMeetingSummary(m, transcript, { hintStats, sentimentData });
-        await persistSummary(req.params.id, summary);
+        return reply.code(404).send({ code: "not-found", message: "Summary not yet generated. POST /summarize first." } as unknown as MeetingSummary);
       }
       return reply.send(summary);
     },
@@ -140,6 +140,39 @@ export async function registerSummaryRoutes(app: FastifyInstance) {
       };
       await persistSummary(req.params.id, next);
       return reply.send(next.internal.actionItems);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { q: string; a: string; chips: string[]; at: string; urgent: boolean } }>(
+    "/meetings/:id/qa",
+    async (req, reply) => {
+      if (!isFirestoreEnabled()) return reply.code(501).send({ code: "no-firestore" });
+      const m = await meetingsRepo.get(req.params.id);
+      if (!m || m.ownerUid !== req.user!.uid) return reply.code(404).send({ code: "not-found" });
+      const id = `qa-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      await getDb()
+        .collection("meetings")
+        .doc(req.params.id)
+        .collection("qa")
+        .doc(id)
+        .set(req.body);
+      return reply.code(201).send({ id });
+    },
+  );
+
+  app.post<{ Params: { id: string; hintId: string }; Body: { actedOn: boolean } }>(
+    "/meetings/:id/hints/:hintId/feedback",
+    async (req, reply) => {
+      if (!isFirestoreEnabled()) return reply.code(501).send({ code: "no-firestore" });
+      const m = await meetingsRepo.get(req.params.id);
+      if (!m || m.ownerUid !== req.user!.uid) return reply.code(404).send({ code: "not-found" });
+      await getDb()
+        .collection("meetings")
+        .doc(req.params.id)
+        .collection("hints")
+        .doc(req.params.hintId)
+        .update({ actedOn: req.body.actedOn ?? true });
+      return reply.send({ ok: true });
     },
   );
 
@@ -214,4 +247,26 @@ async function loadSentimentSeries(meetingId: string): Promise<{ values: number[
   const lastDoc = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : undefined;
   const lastKind = lastDoc ? (String(lastDoc.data().event?.kind ?? "neutral")) : "neutral";
   return { values, lastKind };
+}
+
+async function loadQAHistory(meetingId: string): Promise<import("@scoach/types").QuietAskEntry[]> {
+  if (!isFirestoreEnabled()) return [];
+  const snap = await getDb()
+    .collection("meetings")
+    .doc(meetingId)
+    .collection("qa")
+    .orderBy("at", "asc")
+    .get();
+  return snap.docs.map((d) => d.data() as import("@scoach/types").QuietAskEntry);
+}
+
+async function loadActedHints(meetingId: string): Promise<import("@scoach/types").Hint[]> {
+  if (!isFirestoreEnabled()) return [];
+  const snap = await getDb()
+    .collection("meetings")
+    .doc(meetingId)
+    .collection("hints")
+    .where("actedOn", "==", true)
+    .get();
+  return snap.docs.map((d) => d.data() as import("@scoach/types").Hint);
 }

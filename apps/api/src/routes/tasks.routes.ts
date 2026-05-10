@@ -12,7 +12,7 @@ import { invalidateSummaryCache } from "./summary.routes.ts";
 
 export async function registerTasksRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { client?: string; status?: string }; Reply: ListTasksResponse }>(
-    "/tasks",
+    "/api/tasks",
     async (req) => {
       const uid = req.user!.uid;
       const meetings = await meetingsRepo.listForOwner(uid);
@@ -28,10 +28,10 @@ export async function registerTasksRoutes(app: FastifyInstance) {
             client: m.account.name,
             meetingTitle: m.title,
             meetingDate: m.scheduledAt ?? m.createdAt,
-            who: ai.who,
-            what: ai.what,
-            due: ai.due,
-            done: ai.done,
+            who: ai.who ?? "",
+            what: ai.what ?? "",
+            due: ai.due ?? "",
+            done: ai.done ?? false,
           });
         }
       }
@@ -44,7 +44,7 @@ export async function registerTasksRoutes(app: FastifyInstance) {
 
       filtered.sort((a, b) => {
         if (a.done !== b.done) return a.done ? 1 : -1;
-        return a.due.localeCompare(b.due);
+        return (a.due || "").localeCompare(b.due || "");
       });
 
       return { items: filtered };
@@ -52,7 +52,7 @@ export async function registerTasksRoutes(app: FastifyInstance) {
   );
 
   app.patch<{ Params: { taskId: string }; Body: UpdateTaskRequest; Reply: UpdateTaskResponse }>(
-    "/tasks/:taskId",
+    "/api/tasks/:taskId",
     async (req, reply) => {
       const parts = req.params.taskId.split("::");
       const meetingId = parts[0];
@@ -73,7 +73,12 @@ export async function registerTasksRoutes(app: FastifyInstance) {
       if (idx === -1) return reply.code(404).send({} as TaskView);
 
       const existing = summary.internal.actionItems[idx]!;
-      summary.internal.actionItems[idx] = { ...existing, done: req.body.done };
+      const patch: Record<string, unknown> = {};
+      if (req.body.done !== undefined) patch.done = req.body.done;
+      if (req.body.who !== undefined) patch.who = req.body.who;
+      if (req.body.what !== undefined) patch.what = req.body.what;
+      if (req.body.due !== undefined) patch.due = req.body.due;
+      summary.internal.actionItems[idx] = { ...existing, ...patch };
       await summaryRepo.write(meetingId, summary);
       invalidateSummaryCache(meetingId);
 

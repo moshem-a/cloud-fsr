@@ -907,6 +907,13 @@ html[dir="rtl"] .you-badge { margin-left: 0; margin-right: 6px; }
 .task-what { color: var(--text-1); line-height: 1.4; }
 .task-due { font-size: 11px; font-weight: 600; text-align: right; color: var(--text-3); }
 .task-due.overdue { color: var(--gc-red, #b00020); }
+.task-editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
+.task-editable:hover { border-bottom-color: var(--border); }
+.task-edit-input {
+  font: inherit; background: var(--bg-inset, var(--surface-2)); border: 1px solid var(--accent, var(--gc-blue));
+  border-radius: 4px; padding: 2px 6px; width: 100%; box-sizing: border-box; color: var(--text-1);
+}
+.task-edit-input[type="date"] { width: auto; font-size: 11px; font-weight: 600; }
 
 /* ───────────── Clients page ───────────── */
 .clients-body { max-width: 1100px; margin: 0 auto; padding: 24px 32px; }

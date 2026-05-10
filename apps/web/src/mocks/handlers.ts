@@ -71,8 +71,17 @@ export const handlers = [
   }),
   http.get(u("/users/me/stats"), () =>
     HttpResponse.json<UserStatsResponse>({
-      thisWeek: { meetings: 7, minutes: 312, hintsActedPct: 64, avgConfidence: 0.78, buyingSignals: 4 },
+      thisWeek: { meetings: 7, minutes: 312, hintsActedPct: 64, avgConfidence: 0.78, openTasks: 5 },
       trend: { meetings: 2, minutes: 44, hintsActedPct: 8 },
+    }),
+  ),
+  http.get(u("/users/me/insights"), () =>
+    HttpResponse.json({
+      items: [
+        { icon: "info", title: "Recurring topics across meetings:", detail: "\"vertex\" (5x), \"migration\" (4x), \"pricing\" (3x)" },
+        { icon: "warn", title: "2 overdue action items.", detail: "Send latency benchmark (Aviv Capital); Prepare pricing deck (Wix)" },
+        { icon: "up", title: "6 meetings tracked.", detail: "Keep using Sally to build deeper insights." },
+      ],
     }),
   ),
 
@@ -103,6 +112,8 @@ export const handlers = [
         tags: [],
         hintCount: 0,
         actedOn: 0,
+        actionItemCount: 0,
+        actionItemDone: 0,
         avatar: "#4285F4",
       }));
 
@@ -271,6 +282,8 @@ export const handlers = [
   ),
   http.get(u("/meetings/:id/summary"), () => HttpResponse.json(SUMMARY)),
   http.get(u("/meetings/:id/summary-data"), () => HttpResponse.json(SUMMARY)),
+  http.post(u("/meetings/:id/hints/:hintId/feedback"), () => HttpResponse.json({ ok: true })),
+  http.post(u("/meetings/:id/qa"), () => HttpResponse.json({ id: `qa-${Date.now()}` }, { status: 201 })),
   http.post(u("/meetings/:id/summarize"), () =>
     HttpResponse.json({ jobId: `sum-${Date.now()}`, status: "done" }),
   ),
@@ -303,7 +316,7 @@ export const handlers = [
   }),
 
   // Tasks
-  http.get(u("/tasks"), ({ request }) => {
+  http.get(u("/api/tasks"), ({ request }) => {
     const url = new URL(request.url);
     const clientFilter = url.searchParams.get("client") ?? "";
     const statusFilter = url.searchParams.get("status") ?? "";
@@ -312,11 +325,13 @@ export const handlers = [
       { taskId: "m-aviv-3::ai-1", meetingId: "m-aviv-3", client: "Aviv Capital", meetingTitle: "Vertex AI Migration · Technical deep-dive", meetingDate: "2026-04-24T14:00:00Z", who: "Noa", what: "Send latency benchmark for europe-west4 vs us-east-1", due: "2026-04-28", done: false },
       { taskId: "m-aviv-3::ai-2", meetingId: "m-aviv-3", client: "Aviv Capital", meetingTitle: "Vertex AI Migration · Technical deep-dive", meetingDate: "2026-04-24T14:00:00Z", who: "Noa", what: "Loop in Lior on architecture review", due: "2026-04-30", done: false },
       { taskId: "m-aviv-3::ai-3", meetingId: "m-aviv-3", client: "Aviv Capital", meetingTitle: "Vertex AI Migration · Technical deep-dive", meetingDate: "2026-04-24T14:00:00Z", who: "Maya", what: "Prepare Model Garden + Anthropic-on-Vertex pricing comparison", due: "2026-05-02", done: false },
-      { taskId: "m-rapyd::ai-1", meetingId: "m-rapyd", client: "Rapyd Labs", meetingTitle: "API Gateway migration review", meetingDate: "2026-04-22T10:00:00Z", who: "Noa", what: "Share Apigee hybrid architecture doc", due: "2026-04-25", done: true },
-      { taskId: "m-rapyd::ai-2", meetingId: "m-rapyd", client: "Rapyd Labs", meetingTitle: "API Gateway migration review", meetingDate: "2026-04-22T10:00:00Z", who: "Noa", what: "Schedule follow-up with payments team", due: "2026-05-01", done: false },
-      { taskId: "m-monday::ai-1", meetingId: "m-monday", client: "Monday.com", meetingTitle: "BigQuery cost optimization", meetingDate: "2026-04-20T09:00:00Z", who: "Noa", what: "Send slot reservation calculator", due: "2026-04-23", done: true },
-      { taskId: "m-wix::ai-1", meetingId: "m-wix", client: "Wix", meetingTitle: "Cloud Run scaling discussion", meetingDate: "2026-04-18T11:00:00Z", who: "Noa", what: "Prepare Cloud Run vs GKE comparison deck", due: "2026-04-22", done: false },
-      { taskId: "m-pagaya::ai-1", meetingId: "m-pagaya", client: "Pagaya", meetingTitle: "ML Ops pipeline review", meetingDate: "2026-04-15T13:00:00Z", who: "Noa", what: "Set up Vertex Pipelines sandbox", due: "2026-04-20", done: true },
+      { taskId: "m-rapyd-2::ai-1", meetingId: "m-rapyd-2", client: "Rapyd Labs", meetingTitle: "BigQuery + Looker discovery", meetingDate: "2026-04-23T10:30:00Z", who: "Noa", what: "Share Apigee hybrid architecture doc", due: "2026-04-25", done: true },
+      { taskId: "m-rapyd-2::ai-2", meetingId: "m-rapyd-2", client: "Rapyd Labs", meetingTitle: "BigQuery + Looker discovery", meetingDate: "2026-04-23T10:30:00Z", who: "Noa", what: "Schedule follow-up with payments team", due: "2026-05-01", done: false },
+      { taskId: "m-monday-7::ai-1", meetingId: "m-monday-7", client: "Monday.com", meetingTitle: "GKE Autopilot follow-up", meetingDate: "2026-04-22T16:00:00Z", who: "Noa", what: "Send slot reservation calculator", due: "2026-04-23", done: true },
+      { taskId: "m-wix-1::ai-1", meetingId: "m-wix-1", client: "Wix", meetingTitle: "First introduction — AI infra", meetingDate: "2026-04-21T09:00:00Z", who: "Noa", what: "Prepare Cloud Run vs GKE comparison deck", due: "2026-04-22", done: false },
+      { taskId: "m-pagaya-1::ai-1", meetingId: "m-pagaya-1", client: "Pagaya", meetingTitle: "Cloud Spanner + Vertex briefing", meetingDate: "2026-04-18T13:30:00Z", who: "Noa", what: "Set up Vertex Pipelines sandbox", due: "2026-04-20", done: true },
+      { taskId: "m-aviv-2::ai-1", meetingId: "m-aviv-2", client: "Aviv Capital", meetingTitle: "Discovery call — algo trading desk", meetingDate: "2026-04-14T11:00:00Z", who: "Noa", what: "Schedule technical follow-up with platform team", due: "2026-04-18", done: true },
+      { taskId: "m-aviv-2::ai-2", meetingId: "m-aviv-2", client: "Aviv Capital", meetingTitle: "Discovery call — algo trading desk", meetingDate: "2026-04-14T11:00:00Z", who: "Noa", what: "Send Vertex AI pricing breakdown", due: "2026-04-17", done: false },
     ];
 
     let filtered = allTasks;
@@ -331,7 +346,7 @@ export const handlers = [
 
     return HttpResponse.json<ListTasksResponse>({ items: filtered });
   }),
-  http.patch(u("/tasks/:taskId"), async ({ params, request }) => {
+  http.patch(u("/api/tasks/:taskId"), async ({ params, request }) => {
     const body = (await request.json()) as UpdateTaskRequest;
     const taskId = decodeURIComponent(params.taskId as string);
     const parts = taskId.split("::");
@@ -341,10 +356,10 @@ export const handlers = [
       client: "Aviv Capital",
       meetingTitle: "Meeting",
       meetingDate: new Date().toISOString(),
-      who: "Noa",
-      what: "Task",
-      due: "2026-05-01",
-      done: body.done,
+      who: body.who ?? "Noa",
+      what: body.what ?? "Task",
+      due: body.due ?? "2026-05-01",
+      done: body.done ?? false,
     });
   }),
 

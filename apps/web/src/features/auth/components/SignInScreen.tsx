@@ -32,7 +32,7 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
           `Access is restricted to ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(" or ")} accounts.`,
         );
       }
-      useAuthStore.getState().setFirebaseUser(fbUser.uid, fbUser.email);
+      useAuthStore.getState().setFirebaseUser(fbUser.uid, fbUser.email, fbUser.displayName ?? null);
       onSignedIn?.();
     } catch (e) {
       setErr((e as Error).message);
@@ -62,10 +62,10 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
       // Try Firebase popup first; if the project isn't configured (local dev), fall back.
       try {
         const fbUser = await signInWithGoogle();
-        useAuthStore.getState().setFirebaseUser(fbUser.uid, fbUser.email);
+        useAuthStore.getState().setFirebaseUser(fbUser.uid, fbUser.email, fbUser.displayName ?? null);
       } catch {
         await new Promise((r) => setTimeout(r, 850));
-        useAuthStore.getState().setFirebaseUser(`dev-${target.email}`, target.email);
+        useAuthStore.getState().setFirebaseUser(`dev-${target.email}`, target.email, target.name);
       }
       onSignedIn?.();
     } catch (e) {

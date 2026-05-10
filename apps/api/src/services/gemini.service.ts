@@ -298,25 +298,32 @@ function isValidComparison(c: unknown): ComparisonTable | undefined {
 }
 
 // ---------- Infographic generation ----------
-const INFOGRAPHIC_SYSTEM = `You are a visual infographic generator for a live sales/technical call. Based on the recent conversation, produce a single visual diagram that helps the sales rep understand the discussion at a glance.
+const INFOGRAPHIC_SYSTEM = `You are a real-time Mermaid chart generator for a live sales/technical call. Generate a Mermaid diagram that visualizes what's being discussed RIGHT NOW.
 
-Choose the BEST diagram kind for the current topic:
-- "flow": for processes, architecture, data flows (nodes + edges)
-- "timeline": for chronological events, project phases (entries with dates)
-- "comparison": for product comparisons, feature vs feature (columns with items)
-- "steps": for action sequences, migration steps, implementation plans (numbered steps)
-- "gantt": for project timelines with date ranges (tasks with start/end dates)
+ALWAYS produce a chart. Never skip. Pick the best Mermaid diagram type:
+- flowchart TD: for architecture, processes, data flows, decision trees (use most often)
+- graph LR: for horizontal flows, pipelines, migration paths
+- sequenceDiagram: for interactions between systems or people
+- pie: for market share, cost breakdowns, usage distribution
+- gantt: for project timelines with dates
 
-Return STRICT JSON matching one of these schemas:
+Return STRICT JSON:
+{ "kind": "flow", "title": "<short title max 40 chars>", "mermaid": "<valid mermaid syntax>" }
 
-For "flow": { "kind": "flow", "title": "...", "data": { "nodes": [{"id":"n1","label":"..."}], "edges": [{"from":"n1","to":"n2","label":"..."}] } }
-For "timeline": { "kind": "timeline", "title": "...", "data": { "entries": [{"label":"...","date":"...","detail":"..."}] } }
-For "comparison": { "kind": "comparison", "title": "...", "data": { "columns": [{"header":"...","items":["...","..."]}] } }
-For "steps": { "kind": "steps", "title": "...", "data": { "steps": [{"title":"...","detail":"..."}] } }
-For "gantt": { "kind": "gantt", "title": "...", "data": { "tasks": [{"name":"...","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}] } }
+Use "flow" for kind for all Mermaid types (flowchart, graph, sequence, pie, gantt).
 
-If the conversation doesn't warrant a new infographic, return: { "skip": true }
-Keep titles short (max 40 chars). Keep data concise — max 6 nodes/entries/steps/tasks.`;
+Example mermaid values:
+- "flowchart TD\\n  A[Client App] --> B[Cloud Run]\\n  B --> C[Firestore]\\n  B --> D[Vertex AI]"
+- "graph LR\\n  A[Current: AWS] --> B[Migration] --> C[GCP]\\n  B --> D[Data Transfer]"
+- "pie title Cost Breakdown\\n  \\"Compute\\" : 40\\n  \\"Storage\\" : 25\\n  \\"Network\\" : 20\\n  \\"Other\\" : 15"
+
+Rules:
+- Keep charts simple: 4-8 nodes max. Rep glances at it in 3 seconds.
+- Use short labels (max 20 chars per node)
+- Match the language of the conversation (Hebrew transcript → Hebrew labels)
+- Focus on what helps the rep RIGHT NOW: architecture being discussed, comparison with competitor, next steps, pricing breakdown
+- Use proper Mermaid syntax — no markdown fences, just the raw diagram code
+- Escape special characters in labels using quotes when needed`;
 
 export interface InfographicRequest {
   rollingTranscript: TranscriptLine[];
@@ -325,35 +332,34 @@ export interface InfographicRequest {
 }
 
 export async function generateInfographic(req: InfographicRequest): Promise<Infographic | null> {
-  if (!isGeminiEnabled() || req.rollingTranscript.length < 5) return null;
+  if (!isGeminiEnabled() || req.rollingTranscript.length < 2) return null;
   try {
     const model = vertex().getGenerativeModel({
       model: MODEL_FLASH,
-      generationConfig: { temperature: 0.4, maxOutputTokens: 2048, responseMimeType: "application/json" },
+      generationConfig: { temperature: 0.5, maxOutputTokens: 1024, responseMimeType: "application/json" },
       systemInstruction: { role: "system", parts: [{ text: INFOGRAPHIC_SYSTEM }] },
     });
     const transcript = req.rollingTranscript
-      .slice(-15)
+      .slice(-12)
       .map((l) => `[${l.t}] ${l.name}: ${l.text}`)
       .join("\n");
-    const prompt = `Meeting: ${req.meetingTitle}
-Goal: ${req.meetingGoal || "(not specified)"}
+    const prompt = `Goal: ${req.meetingGoal || "(general discussion)"}
 
 Recent transcript:
 ${transcript}
 
-Generate the most useful infographic for this conversation right now.`;
+Generate a Mermaid chart for what's being discussed right now.`;
     const raw = await streamToText(model, [{ role: "user", parts: [{ text: prompt }] }]);
     const cleaned = extractJson(raw);
-    const parsed = JSON.parse(cleaned || "{}") as { skip?: boolean; kind?: string; title?: string; data?: unknown };
-    if (parsed.skip || !parsed.kind || !parsed.title || !parsed.data) return null;
-    const validKinds: InfographicKind[] = ["flow", "timeline", "comparison", "steps", "gantt"];
-    if (!validKinds.includes(parsed.kind as InfographicKind)) return null;
+    const parsed = JSON.parse(cleaned || "{}") as { kind?: string; title?: string; mermaid?: string; data?: unknown };
+    if (!parsed.title || !parsed.mermaid) return null;
+    const kind = (parsed.kind as InfographicKind) || "flow";
     return {
       id: randomUUID(),
-      kind: parsed.kind as InfographicKind,
+      kind,
       title: parsed.title,
-      data: parsed.data as Infographic["data"],
+      data: { nodes: [], edges: [] },
+      mermaid: parsed.mermaid,
       generatedAt: new Date().toISOString(),
     };
   } catch (err) {

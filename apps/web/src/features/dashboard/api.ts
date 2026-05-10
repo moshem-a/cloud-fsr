@@ -1,4 +1,6 @@
 import type {
+  CoachInsight,
+  CoachInsightsResponse,
   CreateMeetingRequest,
   ListCalendarEventsResponse,
   ListHistoryQuery,
@@ -30,4 +32,7 @@ export const dashboardApi = {
 
   fetchCalendarEvents: (days = 7) =>
     api<ListCalendarEventsResponse>(`/calendar/events`, { query: { days } }).then((r) => r.events),
+
+  fetchInsights: () =>
+    api<CoachInsightsResponse>("/users/me/insights").then((r) => r.items).catch(() => [] as CoachInsight[]),
 };

@@ -7,6 +7,7 @@ import { DashHeader } from "../../dashboard/components/DashHeader.tsx";
 import { tasksApi } from "../api.ts";
 
 type StatusFilter = "all" | "open" | "done";
+type EditableField = "who" | "what" | "due";
 
 export function TasksScreen() {
   const { client: initialClient } = useSearch({ from: "/_app/tasks" });
@@ -14,16 +15,25 @@ export function TasksScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [clientFilter, setClientFilter] = useState<string>(initialClient ?? "");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editField, setEditField] = useState<EditableField | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   useEffect(() => {
     setLoading(true);
     const query: Record<string, string> = {};
     if (statusFilter !== "all") query.status = statusFilter;
     if (clientFilter) query.client = clientFilter;
+    setError(null);
     tasksApi
       .list(query)
       .then((res) => setTasks(res.items))
-      .catch(() => {})
+      .catch((err) => {
+        console.error("[tasks] fetch failed", err);
+        setError(err instanceof Error ? err.message : "Failed to load tasks");
+      })
       .finally(() => setLoading(false));
   }, [statusFilter, clientFilter]);
 
@@ -45,9 +55,50 @@ export function TasksScreen() {
     });
   }
 
+  function startEdit(task: TaskView, field: EditableField) {
+    setEditingTaskId(task.taskId);
+    setEditField(field);
+    setEditDraft(task[field]);
+  }
+
+  function commitEdit() {
+    if (!editingTaskId || !editField) return;
+    const taskId = editingTaskId;
+    const field = editField;
+    const value = editDraft.trim();
+
+    const old = tasks.find((t) => t.taskId === taskId)?.[field] ?? "";
+    if (value === old) {
+      setEditingTaskId(null);
+      setEditField(null);
+      return;
+    }
+
+    setTasks((prev) =>
+      prev.map((t) => (t.taskId === taskId ? { ...t, [field]: value } : t)),
+    );
+    setEditingTaskId(null);
+    setEditField(null);
+
+    void tasksApi.updateTask(taskId, { [field]: value }).catch(() => {
+      setTasks((prev) =>
+        prev.map((t) => (t.taskId === taskId ? { ...t, [field]: old } : t)),
+      );
+    });
+  }
+
+  function cancelEdit() {
+    setEditingTaskId(null);
+    setEditField(null);
+  }
+
   function isOverdue(due: string): boolean {
     if (!due) return false;
     return new Date(due) < new Date() && due !== new Date().toISOString().slice(0, 10);
+  }
+
+  function isEditing(taskId: string, field: EditableField) {
+    return editingTaskId === taskId && editField === field;
   }
 
   return (
@@ -100,9 +151,14 @@ export function TasksScreen() {
           </select>
         </div>
 
+        {error && (
+          <div className="tasks-empty" style={{ color: "var(--gc-red, #b00020)" }}>
+            {error}
+          </div>
+        )}
         {loading ? (
           <div className="tasks-empty">Loading tasks...</div>
-        ) : tasks.length === 0 ? (
+        ) : !error && tasks.length === 0 ? (
           <div className="tasks-empty">
             No tasks found. Action items from meeting summaries will appear here.
           </div>
@@ -131,11 +187,68 @@ export function TasksScreen() {
                 >
                   {t.meetingTitle}
                 </Link>
-                <span className="task-who">{t.who}</span>
-                <span className="task-what">{t.what}</span>
-                <span className={`task-due mono ${isOverdue(t.due) && !t.done ? "overdue" : ""}`}>
-                  {t.due}
-                </span>
+
+                {isEditing(t.taskId, "who") ? (
+                  <input
+                    type="text"
+                    className="task-edit-input"
+                    value={editDraft}
+                    autoFocus
+                    onChange={(e) => setEditDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitEdit();
+                      if (e.key === "Escape") cancelEdit();
+                    }}
+                    onBlur={commitEdit}
+                  />
+                ) : (
+                  <span className="task-who task-editable" onClick={() => startEdit(t, "who")}>
+                    {t.who || " "}
+                  </span>
+                )}
+
+                {isEditing(t.taskId, "what") ? (
+                  <input
+                    type="text"
+                    className="task-edit-input"
+                    value={editDraft}
+                    autoFocus
+                    onChange={(e) => setEditDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitEdit();
+                      if (e.key === "Escape") cancelEdit();
+                    }}
+                    onBlur={commitEdit}
+                  />
+                ) : (
+                  <span className="task-what task-editable" onClick={() => startEdit(t, "what")}>
+                    {t.what || " "}
+                  </span>
+                )}
+
+                {isEditing(t.taskId, "due") ? (
+                  <input
+                    type="date"
+                    className="task-edit-input"
+                    value={editDraft}
+                    autoFocus
+                    onChange={(e) => {
+                      setEditDraft(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitEdit();
+                      if (e.key === "Escape") cancelEdit();
+                    }}
+                    onBlur={commitEdit}
+                  />
+                ) : (
+                  <span
+                    className={`task-due mono task-editable ${isOverdue(t.due) && !t.done ? "overdue" : ""}`}
+                    onClick={() => startEdit(t, "due")}
+                  >
+                    {t.due || " "}
+                  </span>
+                )}
               </div>
             ))}
           </div>

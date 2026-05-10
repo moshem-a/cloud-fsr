@@ -40,8 +40,7 @@ export type { SpeakerRole };
 const SENTIMENT_TICK_MS = 20_000;
 const FOLLOWUPS_TICK_MS = 60_000;
 const TIPS_TICK_MS = 25_000;
-const INFOGRAPHIC_TICK_MS = 45_000;
-const INFOGRAPHIC_MIN_LINES = 5;
+const INFOGRAPHIC_TICK_MS = 20_000;
 const ROLLING_WINDOW = 12;
 // Hint heuristic: fire a hint cycle on every final transcript line. Dedup via
 // recentHintTitles prevents flooding. Time gate (HINT_TIME_MS) still applies.
@@ -326,6 +325,11 @@ async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Pr
     void runHintCycle(session, highPriority ? "high" : "normal").finally(() => {
       session.hintInFlight = false;
     });
+
+    // 3b. Infographic — piggyback on the exact same trigger as hints.
+    if (!session.infographicInFlight) {
+      void runInfographicTick(session);
+    }
   }
 
   // 4. Quick answer — when the client asks a question, generate an instant answer
@@ -361,9 +365,9 @@ async function patchParticipants(session: ActiveSession): Promise<void> {
 
 async function runInfographicTick(session: ActiveSession): Promise<void> {
   if (session.infographicInFlight) return;
-  const newLines = session.rollingTranscript.length - session.linesAtLastInfographic;
-  if (newLines < INFOGRAPHIC_MIN_LINES) return;
   session.infographicInFlight = true;
+  const transcriptLen = session.rollingTranscript.length;
+  console.log(`[audio-session] infographic tick start meeting=${session.meetingId} transcriptLen=${transcriptLen}`);
   try {
     const ig = await generateInfographic({
       rollingTranscript: session.rollingTranscript,
@@ -371,9 +375,12 @@ async function runInfographicTick(session: ActiveSession): Promise<void> {
       meetingTitle: "",
     });
     if (ig) {
+      console.log(`[audio-session] infographic generated kind=${ig.kind} title="${ig.title}" meeting=${session.meetingId}`);
       await liveRepo.writeInfographic(session.meetingId, ig);
-      session.linesAtLastInfographic = session.rollingTranscript.length;
+      session.linesAtLastInfographic = transcriptLen;
       session.lastInfographicAt = Date.now();
+    } else {
+      console.log(`[audio-session] infographic tick returned null meeting=${session.meetingId}`);
     }
   } catch (err) {
     console.warn(`[audio-session] infographic tick error: ${(err as Error).message}`);
