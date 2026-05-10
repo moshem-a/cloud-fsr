@@ -1,6 +1,5 @@
 import type { Meeting } from "@scoach/types";
 
-import { LiveTipsPanel } from "./LiveTipsPanel.tsx";
 import { NotesPanel } from "./NotesPanel.tsx";
 import { ScreenSharePreview, type ScreenSharePreviewProps } from "./ScreenSharePreview.tsx";
 import { SentimentDual } from "./SentimentDual.tsx";
@@ -12,8 +11,7 @@ export interface ContextRailProps extends ScreenSharePreviewProps {
 /**
  * Left-rail layout:
  *   1. ScreenSharePreview  — start/switch/stop screen share, mic indicator
- *   2. Live tips           — real-time coaching advice, newest on top
- *   3. My notes            — always-visible private notes (manual + auto)
+ *   2. My notes            — always-visible private notes (manual + auto)
  */
 export function ContextRail({
   meeting,
@@ -38,8 +36,6 @@ export function ContextRail({
       />
 
       <SentimentDual />
-
-      <LiveTipsPanel />
 
       <NotesPanel meetingId={meeting.id} />
     </aside>
