@@ -368,6 +368,36 @@ Generate a Mermaid chart for what's being discussed right now.`;
   }
 }
 
+// ---------- Auto meeting name ----------
+
+export async function generateMeetingName(transcript: TranscriptLine[]): Promise<string | null> {
+  if (!isGeminiEnabled() || transcript.length < 3) return null;
+  try {
+    const model = vertex().getGenerativeModel({
+      model: MODEL_FLASH,
+      generationConfig: { temperature: 0.3, maxOutputTokens: 100, responseMimeType: "application/json" },
+      systemInstruction: {
+        role: "system",
+        parts: [
+          {
+            text: `Generate a short meeting title (max 6 words) from the transcript. The title should capture the main topic discussed. Reply as JSON: { "title": "<meeting title>" }. Use the same language as the conversation.`,
+          },
+        ],
+      },
+    });
+    const context = transcript
+      .slice(0, 15)
+      .map((l) => `${l.name}: ${l.text}`)
+      .join("\n");
+    const raw = await streamToText(model, [{ role: "user", parts: [{ text: context }] }]);
+    const parsed = JSON.parse(extractJson(raw) || "{}") as { title?: string };
+    return parsed.title || null;
+  } catch (err) {
+    console.warn(`[gemini] generateMeetingName failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 // ---------- Live tips (periodic coaching advice for the rep) ----------
 const LIVE_TIP_SYSTEM = `You are a senior sales manager silently observing a live customer call. Whisper ONE short, actionable tip to your sales rep right now.
 

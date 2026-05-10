@@ -1,8 +1,10 @@
 import type { Hint, Participant, TranscriptLine } from "@scoach/types";
 import { randomUUID } from "node:crypto";
 
+import { getDb, isFirestoreEnabled } from "../repos/firestore.ts";
 import { meetingsRepo } from "../repos/meetings.repo.ts";
 import { liveRepo } from "../repos/live.repo.ts";
+import { summaryRepo } from "../repos/summary.repo.ts";
 import {
   analyzeScreenFrame,
   classifySentiment,
@@ -12,11 +14,13 @@ import {
   generateHint,
   generateInfographic,
   generateLiveTip,
+  generateMeetingName,
   generateQuickAnswer,
   hasActionItemPattern,
   isGeminiEnabled,
   regexEntities,
 } from "./gemini.service.ts";
+import { classifyMeetingType, generateMeetingSummary } from "./summary.service.ts";
 import { isSttEnabled, openSttSession, type SpeakerRole, type SttSession } from "./stt.service.ts";
 
 export type { SpeakerRole };
@@ -41,6 +45,7 @@ const SENTIMENT_TICK_MS = 20_000;
 const FOLLOWUPS_TICK_MS = 60_000;
 const TIPS_TICK_MS = 25_000;
 const INFOGRAPHIC_TICK_MS = 20_000;
+const SUMMARY_TICK_MS = 4 * 60 * 1000;
 const ROLLING_WINDOW = 12;
 // Hint heuristic: fire a hint cycle on every final transcript line. Dedup via
 // recentHintTitles prevents flooding. Time gate (HINT_TIME_MS) still applies.
@@ -90,21 +95,39 @@ interface ActiveSession {
   lastInfographicAt: number;
   infographicInFlight: boolean;
   linesAtLastInfographic: number;
+  // Rolling summary
+  summaryTick: NodeJS.Timeout | null;
+  lastSummaryAt: number;
+  summaryInFlight: boolean;
 }
 
 const NOOP_STT: SttSession = { pushAudio: () => {}, close: () => {} };
 
 const sessions = new Map<string, ActiveSession>();
 
-function evictIdle() {
+async function evictIdle() {
   const now = Date.now();
   for (const [id, s] of sessions.entries()) {
     if (now - s.lastActivityAt > IDLE_TIMEOUT_MS) {
+      console.log(`[audio-session] idle-evicting meeting=${id}, finalizing summary`);
+      await runRollingSummary(s).catch((err) =>
+        console.warn(`[audio-session] final summary failed for ${id}: ${(err as Error).message}`),
+      );
+      const m = await meetingsRepo.get(id).catch(() => null);
+      if (m) {
+        const latest = await summaryRepo.get(id).catch(() => null);
+        if (latest) {
+          const meetingType = classifyMeetingType(latest.internal, m);
+          await meetingsRepo.patch(id, { status: "summarized", meetingType, endedAt: new Date().toISOString() }).catch(() => {});
+        } else {
+          await meetingsRepo.patch(id, { status: "ended", endedAt: new Date().toISOString() }).catch(() => {});
+        }
+      }
       stopSession(id);
     }
   }
 }
-setInterval(evictIdle, 60_000).unref();
+setInterval(() => void evictIdle(), 60_000).unref();
 
 export function getOrCreateSession(meetingId: string): ActiveSession {
   let s = sessions.get(meetingId);
@@ -140,6 +163,9 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     lastInfographicAt: 0,
     infographicInFlight: false,
     linesAtLastInfographic: 0,
+    summaryTick: null,
+    lastSummaryAt: 0,
+    summaryInFlight: false,
   };
 
   // Cache meeting goal once — avoids a Firestore read on every hint/tip/answer cycle.
@@ -225,7 +251,10 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     session.infographicTick = setInterval(() => {
       void runInfographicTick(session);
     }, INFOGRAPHIC_TICK_MS);
-    console.log(`[audio-session] started sentiment+followups+tips+infographic timers for ${meetingId}`);
+    session.summaryTick = setInterval(() => {
+      void runRollingSummary(session);
+    }, SUMMARY_TICK_MS);
+    console.log(`[audio-session] started sentiment+followups+tips+infographic+summary timers for ${meetingId}`);
   } else {
     console.warn(`[audio-session] Gemini disabled (no GCP_PROJECT_ID), skipping hint/sentiment/followups for ${meetingId}`);
   }
@@ -241,6 +270,7 @@ export function stopSession(meetingId: string): void {
   if (s.followupsTick) clearInterval(s.followupsTick);
   if (s.tipsTick) clearInterval(s.tipsTick);
   if (s.infographicTick) clearInterval(s.infographicTick);
+  if (s.summaryTick) clearInterval(s.summaryTick);
   void patchParticipants(s).catch(() => {});
   for (const role of ["rep", "client"] as const) {
     try {
@@ -341,6 +371,20 @@ async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Pr
   if (hasActionItemPattern(line.text) && isGeminiEnabled()) {
     void detectAndWriteActionItem(session, line).catch(() => {});
   }
+
+  // 6. Auto-detect meeting name after ~5 transcript lines
+  if (session.rollingTranscript.length === 5 && isGeminiEnabled()) {
+    void (async () => {
+      const m = await meetingsRepo.get(session.meetingId).catch(() => null);
+      if (m && (!m.title || m.title === "New Meeting" || m.title.startsWith("Meeting with"))) {
+        const name = await generateMeetingName(session.rollingTranscript).catch(() => null);
+        if (name) {
+          await meetingsRepo.patch(session.meetingId, { title: name }).catch(() => {});
+          console.log(`[audio-session] auto-named meeting=${session.meetingId} title="${name}"`);
+        }
+      }
+    })();
+  }
 }
 
 const PARTICIPANT_COLORS = ["#EA4335", "#F9AB00", "#1A73E8", "#34A853", "#A142F4", "#E8710A"];
@@ -386,6 +430,60 @@ async function runInfographicTick(session: ActiveSession): Promise<void> {
     console.warn(`[audio-session] infographic tick error: ${(err as Error).message}`);
   } finally {
     session.infographicInFlight = false;
+  }
+}
+
+async function runRollingSummary(session: ActiveSession): Promise<void> {
+  if (session.summaryInFlight) return;
+  if (session.rollingTranscript.length < 3) return;
+  session.summaryInFlight = true;
+  try {
+    const m = await meetingsRepo.get(session.meetingId);
+    if (!m) return;
+    if (!isFirestoreEnabled()) return;
+    const snap = await getDb()
+      .collection("meetings")
+      .doc(session.meetingId)
+      .collection("transcript")
+      .orderBy("_at", "asc")
+      .get();
+    const transcript = snap.docs.map((d) => d.data() as TranscriptLine);
+    if (transcript.length === 0) return;
+
+    // Auto-detect meeting name if still using default
+    if (!m.title || m.title === "New Meeting" || m.title.startsWith("Meeting with")) {
+      const autoName = await generateMeetingName(transcript).catch(() => null);
+      if (autoName) {
+        await meetingsRepo.patch(session.meetingId, { title: autoName }).catch(() => {});
+        m.title = autoName;
+      }
+    }
+
+    const [hintSnap, sentSnap] = await Promise.all([
+      getDb().collection("meetings").doc(session.meetingId).collection("hints").get(),
+      getDb().collection("meetings").doc(session.meetingId).collection("sentiment").orderBy("at", "asc").get(),
+    ]);
+    const hintStats = {
+      total: hintSnap.size,
+      acted: hintSnap.docs.filter((d) => d.data().actedOn).length,
+    };
+    const sentValues = sentSnap.docs.map((d) => (d.data().value as number) ?? 50);
+    const lastKind =
+      sentSnap.docs.length > 0
+        ? String(sentSnap.docs[sentSnap.docs.length - 1]!.data().event?.kind ?? "neutral")
+        : "neutral";
+
+    const summary = await generateMeetingSummary(m, transcript, {
+      hintStats,
+      sentimentData: { values: sentValues, lastKind },
+    });
+    await summaryRepo.write(session.meetingId, summary);
+    session.lastSummaryAt = Date.now();
+    console.log(`[audio-session] rolling summary saved for meeting=${session.meetingId}`);
+  } catch (err) {
+    console.warn(`[audio-session] rolling summary failed: ${(err as Error).message}`);
+  } finally {
+    session.summaryInFlight = false;
   }
 }
 

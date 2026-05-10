@@ -81,6 +81,24 @@ service cloud.firestore {
       match /notes/{noteId} {
         allow read, write: if isAllowedDomain() && isMeetingOwner(meetingId);
       }
+
+      // Infographic diagrams — server-written, client-readable.
+      match /infographics/{igId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // AI tips — server-written, client-readable.
+      match /tips/{tipId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
+
+      // Auto-generated notes — server-written, client-readable.
+      match /autoNotes/{noteId} {
+        allow read: if isAllowedDomain() && isMeetingOwner(meetingId);
+        allow write: if false;
+      }
     }
 
     // Shares — server-only (admin SDK).
