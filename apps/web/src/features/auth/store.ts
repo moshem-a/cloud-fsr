@@ -14,10 +14,13 @@ export interface AuthState {
   user: User | null;
   /** User's Gemini API key (browser-local; only used for Quiet Ask). Persisted. */
   geminiKey: string | null;
+  /** Google OAuth access token for Calendar API. Persisted. */
+  googleAccessToken: string | null;
 
   setFirebaseUser: (uid: string | null, email: string | null) => void;
   setUser: (user: User | null) => void;
   setGeminiKey: (key: string | null) => void;
+  setGoogleAccessToken: (token: string | null) => void;
   clear: () => void;
   /** Mark bootstrap done (after hydrate or onAuthChange first-fire). */
   markInitialized: () => void;
@@ -31,19 +34,19 @@ export const useAuthStore = create<AuthState>()(
       email: null,
       user: null,
       geminiKey: null,
+      googleAccessToken: null,
 
       setFirebaseUser: (uid, email) =>
         set({ firebaseUid: uid, email, initialized: true }),
       setUser: (user) => set({ user }),
       setGeminiKey: (key) => set({ geminiKey: key }),
+      setGoogleAccessToken: (token) => set({ googleAccessToken: token }),
       clear: () =>
-        // NOTE: deliberately keeps `geminiKey`. The key is a per-device user
-        // setting, not session state — re-prompting on every sign-in is annoying.
-        // Use Settings → Gemini API → Remove key to clear it explicitly.
         set({
           firebaseUid: null,
           email: null,
           user: null,
+          googleAccessToken: null,
           initialized: true,
         }),
       markInitialized: () => set({ initialized: true }),
@@ -55,6 +58,7 @@ export const useAuthStore = create<AuthState>()(
         firebaseUid: s.firebaseUid,
         email: s.email,
         geminiKey: s.geminiKey,
+        googleAccessToken: s.googleAccessToken,
       }),
     },
   ),

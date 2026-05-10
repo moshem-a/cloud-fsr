@@ -12,6 +12,7 @@ import { registerContextRoutes } from "./routes/context.routes.ts";
 import { registerLiveRoutes } from "./routes/live.routes.ts";
 import { registerMeetingsRoutes } from "./routes/meetings.routes.ts";
 import { registerSummaryRoutes } from "./routes/summary.routes.ts";
+import { registerCalendarRoutes } from "./routes/calendar.routes.ts";
 import { registerTasksRoutes } from "./routes/tasks.routes.ts";
 import { registerUsersRoutes } from "./routes/users.routes.ts";
 import { registerWsMeeting } from "./routes/ws.meeting.ts";
@@ -46,6 +47,7 @@ export async function buildServer() {
   await registerContextRoutes(app);
   await registerLiveRoutes(app);
   await registerSummaryRoutes(app);
+  await registerCalendarRoutes(app);
   await registerTasksRoutes(app);
   await registerWsMeeting(app);
 

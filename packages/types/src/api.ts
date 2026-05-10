@@ -13,6 +13,7 @@ import type {
   Share,
   SharePermission,
 } from "./meeting.ts";
+import type { CalendarEvent } from "./calendar.ts";
 import type { TeamMember, User, UserProfile, UserSettings } from "./user.ts";
 
 export interface ApiError {
@@ -166,6 +167,11 @@ export interface CreateShareResponse {
 }
 export interface ListSharesResponse {
   items: Share[];
+}
+
+// ---------- Calendar ----------
+export interface ListCalendarEventsResponse {
+  events: CalendarEvent[];
 }
 
 // ---------- Team ----------

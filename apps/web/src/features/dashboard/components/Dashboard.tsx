@@ -1,12 +1,13 @@
-import type { HistoryItem, TeamMember, UserStatsResponse } from "@scoach/types";
+import type { CalendarEvent, HistoryItem, TeamMember, UserStatsResponse } from "@scoach/types";
 import { Chev, Inbox, Search, Spark, User as UserIcon } from "@scoach/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { dashboardApi } from "../api.ts";
 import { DashHeader } from "./DashHeader.tsx";
 import { HistShareBtn } from "./HistShareBtn.tsx";
 import { StatTile } from "./StatTile.tsx";
+import { UpcomingMeetings } from "./UpcomingMeetings.tsx";
 
 type Scope = "mine" | "shared";
 type StageFilter = "all" | "discovery" | "qualification" | "negotiation";
@@ -123,6 +124,26 @@ export function Dashboard() {
     }
   }
 
+  const startFromCalendar = useCallback(async (event: CalendarEvent) => {
+    setCreating(true);
+    try {
+      const externals = event.attendees.filter(
+        (a) => !a.self && !a.email.endsWith("@google.com") && !a.email.endsWith("@altostrat.com"),
+      );
+      const domainName = (externals[0]?.email.split("@")[1]?.split(".")[0] ?? "").replace(/^\w/, (c) => c.toUpperCase());
+      const clientName = externals[0]?.displayName ?? (domainName || event.summary);
+
+      const m = await dashboardApi.createMeeting({
+        account: { name: clientName },
+        title: event.summary,
+        stage: "Discovery",
+      });
+      nav({ to: "/meetings/$id/live", params: { id: m.id } });
+    } finally {
+      setCreating(false);
+    }
+  }, [nav]);
+
   function openMeeting(id: string, status?: string) {
     // Resume in-progress meetings on the live page; route ended/summarized
     // meetings to the summary view. Drafts (never started) go to setup so
@@ -172,6 +193,9 @@ export function Dashboard() {
             <StatTile label="Buying signals" value={stats?.thisWeek.buyingSignals ?? 9} trend="↑ Aviv, Monday" color="red" />
           </div>
         </section>
+
+        {/* Upcoming calendar meetings */}
+        <UpcomingMeetings onStartCoaching={startFromCalendar} />
 
         {/* History */}
         <section className="dash-history">

@@ -1,4 +1,5 @@
 import { getIdToken } from "./firebase.ts";
+import { useAuthStore } from "../features/auth/store.ts";
 
 // Empty/undefined env → root-relative paths (same-origin, behind Firebase Hosting).
 // Otherwise use the explicit URL (e.g. http://localhost:8080 in dev).
@@ -59,6 +60,9 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     // for any non-MSW curls; doesn't matter since MSW intercepts before fetch.
     if (token) headers.set("Authorization", `Bearer ${token}`);
     else if (import.meta.env.DEV) headers.set("Authorization", "Bearer dev-token");
+
+    const googleToken = useAuthStore.getState().googleAccessToken;
+    if (googleToken) headers.set("X-Google-Access-Token", googleToken);
   }
 
   const res = await fetch(url, {

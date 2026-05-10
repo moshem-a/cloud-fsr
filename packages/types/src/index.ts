@@ -1,5 +1,6 @@
 export * from "./user.ts";
 export * from "./meeting.ts";
+export * from "./calendar.ts";
 export * from "./api.ts";
 export * from "./ws.ts";
 

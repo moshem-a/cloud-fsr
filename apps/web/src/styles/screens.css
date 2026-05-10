@@ -118,6 +118,56 @@
 .hist-cta { color: var(--text-4); }
 .hist-hints { font-size: 12px; }
 
+/* Upcoming meetings (calendar) */
+.dash-upcoming { grid-column: 1 / -1; }
+.dash-upcoming-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.dash-upcoming-head .dash-h2 { display: flex; align-items: center; gap: 6px; }
+.upcoming-count { font-size: 11px; color: var(--text-4); font-weight: 500; }
+.upcoming-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.upcoming-card {
+  background: var(--surface-1); border: 1px solid var(--border-soft);
+  border-radius: var(--r-card, 12px); padding: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.upcoming-card:hover { border-color: var(--gc-blue); box-shadow: 0 2px 8px rgba(26,115,232,.08); }
+.upcoming-soon { border-left: 3px solid var(--gc-green); }
+.upcoming-skeleton {
+  height: 140px; background: var(--surface-2);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: .6; } 50% { opacity: .3; } }
+.upcoming-time-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.upcoming-date { color: var(--text-3); font-weight: 500; }
+.upcoming-clock { color: var(--text-2); font-weight: 600; }
+.upcoming-rel {
+  margin-left: auto; padding: 1px 6px; border-radius: var(--r-pill, 99px);
+  background: var(--surface-3); color: var(--text-3); font-size: 10px; font-weight: 600;
+}
+.upcoming-rel-soon { background: var(--gc-green-50, #e6f4ea); color: var(--gc-green, #1e8e3e); }
+.upcoming-title { font-size: 13px; font-weight: 600; color: var(--text-1); line-height: 1.3; }
+.upcoming-attendees {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--text-3);
+}
+.upcoming-meet-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10.5px; color: var(--gc-blue); font-weight: 500;
+  text-decoration: none;
+}
+.upcoming-meet-link:hover { text-decoration: underline; }
+.upcoming-coach-btn { margin-top: auto; width: 100%; justify-content: center; }
+.upcoming-empty {
+  grid-column: 1 / -1; text-align: center; padding: 24px;
+  color: var(--text-4); font-size: 13px;
+}
+
 /* Aside cards */
 .dash-aside { display: flex; flex-direction: column; gap: 12px; }
 .client-list { list-style: none; margin: 0; padding: 0; }

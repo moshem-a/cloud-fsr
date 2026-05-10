@@ -23,6 +23,7 @@
       { "source": "/ws/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "/tasks", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "/tasks/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
+      { "source": "/calendar/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "**", "destination": "/index.html" }
     ],
     "headers": [

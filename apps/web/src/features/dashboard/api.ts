@@ -1,5 +1,6 @@
 import type {
   CreateMeetingRequest,
+  ListCalendarEventsResponse,
   ListHistoryQuery,
   ListHistoryResponse,
   ListTeamMembersResponse,
@@ -26,4 +27,7 @@ export const dashboardApi = {
 
   shareMeeting: (id: string, recipients: { email: string; permission: "view" | "comment" | "edit" }[]) =>
     api(`/meetings/${id}/share`, { method: "POST", body: { recipients } }),
+
+  fetchCalendarEvents: (days = 7) =>
+    api<ListCalendarEventsResponse>(`/calendar/events`, { query: { days } }).then((r) => r.events),
 };
