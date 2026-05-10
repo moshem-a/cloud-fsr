@@ -41,11 +41,10 @@ export function isAllowedEmail(email: string | null | undefined): boolean {
   );
 }
 
-export async function signInWithGoogle(): Promise<{ user: FirebaseUser; googleAccessToken: string | null }> {
+export async function signInWithGoogle(): Promise<FirebaseUser> {
   const app = getFirebaseApp();
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
-  provider.addScope("https://www.googleapis.com/auth/calendar.readonly");
   provider.setCustomParameters({ prompt: "select_account" });
 
   const cred = await signInWithPopup(auth, provider);
@@ -53,8 +52,7 @@ export async function signInWithGoogle(): Promise<{ user: FirebaseUser; googleAc
     await fbSignOut(auth);
     throw new Error(`Access is restricted to ${ALLOWED_DOMAINS.map((d) => `@${d}`).join(" or ")} accounts`);
   }
-  const oauthCred = GoogleAuthProvider.credentialFromResult(cred);
-  return { user: cred.user, googleAccessToken: oauthCred?.accessToken ?? null };
+  return cred.user;
 }
 
 export async function signOut(): Promise<void> {
