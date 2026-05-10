@@ -1,28 +1,32 @@
-import { GoogleGenAI, Modality, type Session } from "@google/genai";
+import { v2 as speechV2 } from "@google-cloud/speech";
 import type { TranscriptLine } from "@scoach/types";
 import { randomUUID } from "node:crypto";
+import type { Writable } from "node:stream";
 
 import { isFirestoreEnabled } from "../repos/firestore.ts";
 
 /**
- * Streaming transcription via Gemini Live (replaces Cloud Speech V2 Chirp 3).
+ * Streaming transcription via Cloud Speech-to-Text V2 with `chirp_2`.
  *
- * We hold a per-meeting Live WebSocket session. Audio frames pushed by the
- * HTTP /audio uploader are base64-encoded LINEAR16 16 kHz mono PCM, sent via
- * `sendRealtimeInput`. Gemini emits incremental `inputTranscription` events
- * which we surface as partials; the `finished: true` flag turns into a final
- * line for downstream entity-extraction + hint generation.
+ * Why this model:
+ *   - chirp_2 is a real streaming ASR model available in regional locations
+ *     including `us-central1`. (chirp_3 only exists in `us`/`eu` multi-regions.)
+ *   - Supports Hebrew (iw-IL) + English (en-US) bilingual auto-detection.
  *
- * Gracefully degrades to a no-op when no GCP project is configured —
- * the canned-replay path stays in charge in that case.
+ * Why not Gemini Live: it's a conversational model. Its `inputAudioTranscription`
+ * field exists but the model only emits transcription events when it's actively
+ * "listening" in a conversational context — continuously streamed, non-conversational
+ * audio gets silently dropped.
+ *
+ * Gracefully degrades to a no-op when no GCP project is configured.
  */
 
 export interface SttSession {
-  /** Push a PCM frame (16-bit mono 16 kHz) into the streaming recognizer. */
   pushAudio(pcm: Buffer): void;
-  /** Cleanly close the upstream STT session. */
   close(): void;
 }
+
+export type SpeakerRole = "rep" | "client";
 
 export interface SttCallbacks {
   onPartial?: (line: TranscriptLine) => void;
@@ -34,198 +38,146 @@ export function isSttEnabled(): boolean {
   return Boolean(process.env.GCP_PROJECT_ID || isFirestoreEnabled());
 }
 
-let _client: GoogleGenAI | null = null;
-function getClient(): GoogleGenAI {
+// chirp_3 supports Hebrew (iw-IL) — chirp_2 does not. chirp_3 lives only in
+// the `us` and `eu` multi-region locations (NOT in zonal locations like
+// `us-central1`). Keep both env-overridable for ops flexibility.
+const STT_LOCATION = process.env.STT_LOCATION ?? "us";
+const STT_MODEL = process.env.STT_MODEL ?? "chirp_3";
+
+let _client: speechV2.SpeechClient | null = null;
+function getClient(): speechV2.SpeechClient {
   if (_client) return _client;
-  _client = new GoogleGenAI({
-    vertexai: true,
-    project: process.env.GCP_PROJECT_ID,
-    location: process.env.VERTEX_REGION ?? "us-central1",
-  });
+  // Regional STT requires both a regional recognizer path AND a regional API
+  // endpoint (e.g. `us-central1-speech.googleapis.com`).
+  const apiEndpoint =
+    STT_LOCATION === "global" ? "speech.googleapis.com" : `${STT_LOCATION}-speech.googleapis.com`;
+  _client = new speechV2.SpeechClient({ apiEndpoint });
   return _client;
 }
 
-// Vertex AI Gemini Live (GA, released Dec 2025). The older preview IDs
-// (`gemini-2.0-flash-live-preview-04-09`, `gemini-live-2.5-flash-preview-…`)
-// are deprecated and may not be enabled on the project. Override via env if
-// a newer build is published.
-const LIVE_MODEL = process.env.LIVE_MODEL ?? "gemini-live-2.5-flash-native-audio";
+// Chirp 2 streaming caps each audio chunk at 25,600 bytes (= 800 ms of
+// 16-bit mono 16 kHz PCM). The FE batches frames into 1-second blobs
+// (32,000 bytes), so we slice them down here before writing.
+const MAX_CHUNK_BYTES = 25_600;
 
-export function openSttSession(meetingId: string, cb: SttCallbacks): SttSession {
+export function openSttSession(
+  meetingId: string,
+  speakerRole: SpeakerRole,
+  cb: SttCallbacks,
+): SttSession {
   if (!isSttEnabled()) {
-    return {
-      pushAudio: () => {
-        /* noop — canned-replay handles the fixture timeline */
-      },
-      close: () => {
-        /* noop */
-      },
-    };
+    return { pushAudio: () => {}, close: () => {} };
   }
 
-  // Buffer audio frames until the WS handshake completes; flush in order
-  // once the session is open. Gemini Live tolerates ordered backfill.
-  const pending: Buffer[] = [];
-  let session: Session | null = null;
-  let opened = false;
-  let closed = false;
-  const startedAt = Date.now();
-  let partialBuffer = "";
-  let frameCount = 0;
+  const projectId = process.env.GCP_PROJECT_ID!;
+  const recognizer = `projects/${projectId}/locations/${STT_LOCATION}/recognizers/_`;
 
-  function flushPending() {
-    if (!session || !opened) return;
-    while (pending.length > 0) {
-      const buf = pending.shift()!;
-      writeAudio(buf);
-    }
-  }
+  // Bypass the SDK's `streamingRecognize` helper — it's V1-shaped and wraps
+  // audio as `{ audioContent }` (V1 field) instead of `{ audio }` (V2). Going
+  // through `_streamingRecognize` lets us write proper V2 messages directly.
+  // biome-ignore lint/suspicious/noExplicitAny: V2 SDK typing gap
+  const stream = (getClient() as any)._streamingRecognize();
 
-  function writeAudio(pcm: Buffer) {
-    if (!session) return;
-    try {
-      session.sendRealtimeInput({
-        audio: {
-          data: pcm.toString("base64"),
-          mimeType: "audio/pcm;rate=16000",
-        },
-      });
-    } catch (err) {
-      cb.onError?.(err as Error);
-    }
-  }
-
-  function emitFinal(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const sec = Math.floor((Date.now() - startedAt) / 1000);
-    const m = Math.floor(sec / 60).toString().padStart(2, "0");
-    const s = (sec % 60).toString().padStart(2, "0");
-    const line: TranscriptLine = {
-      id: randomUUID(),
-      t: `${m}:${s}`,
-      // Gemini Live's input transcription does not yet expose per-speaker
-      // diarization. Treat all input as the rep's audio side; if the user is
-      // sharing a Meet tab, the client's voice is also in the same channel —
-      // we'll add diarization on top when Live exposes it.
-      speaker: "rep",
-      name: "You",
-      lang: detectLang(trimmed),
-      text: trimmed,
-      isFinal: true,
-    };
-    console.log(`[stt] meeting=${meetingId} FINAL lang=${line.lang} text="${trimmed.slice(0, 80)}"`);
-    cb.onFinal?.(line);
-  }
-
-  function emitPartial(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const sec = Math.floor((Date.now() - startedAt) / 1000);
-    const m = Math.floor(sec / 60).toString().padStart(2, "0");
-    const s = (sec % 60).toString().padStart(2, "0");
-    const line: TranscriptLine = {
-      id: `partial-${meetingId}`,
-      t: `${m}:${s}`,
-      speaker: "rep",
-      name: "You",
-      lang: detectLang(trimmed),
-      text: trimmed,
-      isFinal: false,
-    };
-    cb.onPartial?.(line);
-  }
-
-  // biome-ignore lint/suspicious/noExplicitAny: Live message shape varies by SDK build
-  function handleMessage(msg: any) {
-    const sc = msg?.serverContent;
-    if (!sc) return;
-    const it = sc.inputTranscription;
-    if (it?.text) {
-      partialBuffer += it.text;
-      if (it.finished) {
-        emitFinal(partialBuffer);
-        partialBuffer = "";
-      } else {
-        emitPartial(partialBuffer);
-      }
-    }
-    // turnComplete flushes any residual partial as a final.
-    if (sc.turnComplete && partialBuffer) {
-      emitFinal(partialBuffer);
-      partialBuffer = "";
-    }
-  }
-
-  // Open the live session. Buffered audio flushes once the WS is up.
-  // The native-audio Live model REQUIRES responseModalities: [AUDIO]; sending
-  // [TEXT] returns "Text output is not supported for native audio output
-  // model." We don't care about the model's audio output — we discard it and
-  // only consume `inputAudioTranscription` events for the transcript.
-  void getClient()
-    .live.connect({
-      model: LIVE_MODEL,
+  // First message: recognizer + streamingConfig. Must precede any audio.
+  // Chirp 2 has a smaller config surface than older models — just encoding +
+  // languages + model. Punctuation is on by default; per-word diarization
+  // is not supported here (would need a separate diarization pass).
+  stream.write({
+    recognizer,
+    streamingConfig: {
       config: {
-        responseModalities: [Modality.AUDIO],
-        inputAudioTranscription: {},
-        // Disable VAD/auto-response so the model doesn't try to "reply" to
-        // every audio chunk — we want pure transcription, not a chat.
-        realtimeInputConfig: {
-          automaticActivityDetection: { disabled: true },
+        explicitDecodingConfig: {
+          encoding: "LINEAR16",
+          sampleRateHertz: 16_000,
+          audioChannelCount: 1,
         },
-      } as never,
-      callbacks: {
-        onopen: () => {
-          opened = true;
-          console.log(`[stt] gemini-live opened meeting=${meetingId} model=${LIVE_MODEL}`);
-          flushPending();
-        },
-        onmessage: handleMessage,
-        // biome-ignore lint/suspicious/noExplicitAny: WS event shapes vary by runtime
-        onerror: (e: any) => {
-          const err = (e?.error ?? new Error(e?.message ?? "live error")) as Error;
-          console.error(`[stt] gemini-live error meeting=${meetingId}:`, err.message);
-          cb.onError?.(err);
-        },
-        // biome-ignore lint/suspicious/noExplicitAny: WS event shapes vary by runtime
-        onclose: (e: any) => {
-          if (!closed) {
-            console.warn(`[stt] gemini-live closed meeting=${meetingId} reason="${e?.reason ?? ""}"`);
-            cb.onError?.(new Error(`live session closed: ${e?.reason ?? "unknown"}`));
-          }
-        },
+        // Hebrew in V2 uses the legacy ISO 639-1 code `iw`, NOT `he`.
+        languageCodes: ["iw-IL", "en-US"],
+        model: STT_MODEL,
       },
-    })
-    .then((s) => {
-      session = s;
-      // If onopen already fired before this resolved, flush now.
-      if (opened) flushPending();
-    })
-    .catch((err: Error) => {
-      console.error(`[stt] gemini-live connect failed meeting=${meetingId}:`, err.message);
-      cb.onError?.(err);
-    });
+      streamingFeatures: { interimResults: true },
+    },
+  });
+  console.log(`[stt] opened V2 stream meeting=${meetingId} model=${STT_MODEL} location=${STT_LOCATION} speaker=${speakerRole}`);
+
+  let frameCount = 0;
+  let firstResultLogged = false;
+
+  stream.on("data", (response: { results?: SpeechResult[] }) => {
+    if (!firstResultLogged) {
+      firstResultLogged = true;
+      console.log(`[stt] meeting=${meetingId} first response received from STT`);
+    }
+    for (const result of response.results ?? []) {
+      const alt = result.alternatives?.[0];
+      if (!alt?.transcript) continue;
+      const code = result.languageCode ?? "";
+      const lang: TranscriptLine["lang"] =
+        code.startsWith("he") || code.startsWith("iw") ? "he" : "en";
+      // Speaker is fixed per stream (one stream per audio source). The mic
+      // stream is always "rep", the tab stream is always "client".
+      const line: TranscriptLine = {
+        // Partial id is per-source so mic + tab partials don't overwrite each
+        // other in the FE's single live-partial doc (they're written separately
+        // in audio-session via writePartial — the doc id key is shared, but
+        // throttling ensures only the most recent of either source wins).
+        id: result.isFinal ? randomUUID() : `partial-${meetingId}-${speakerRole}`,
+        t: formatT(result.resultEndOffset),
+        speaker: speakerRole,
+        name: speakerRole === "rep" ? "You" : "Client",
+        lang,
+        text: alt.transcript.trim(),
+        isFinal: !!result.isFinal,
+      };
+      console.log(
+        `[stt] meeting=${meetingId} speaker=${speakerRole} ${result.isFinal ? "FINAL" : "partial"} lang=${lang} text="${line.text.slice(0, 80)}"`,
+      );
+      if (result.isFinal) cb.onFinal?.(line);
+      else cb.onPartial?.(line);
+    }
+  });
+
+  stream.on("error", (err: Error) => {
+    // gRPC errors carry detail in `metadata` and `details` fields beyond
+    // `.message`. Dump everything so future "Invalid arguments" errors
+    // show which field actually broke.
+    // biome-ignore lint/suspicious/noExplicitAny: gax errors are loosely typed
+    const e = err as any;
+    const detail = {
+      message: err.message,
+      code: e.code,
+      details: e.details,
+      metadata: e.metadata?.internalRepr ? Object.fromEntries(e.metadata.internalRepr) : undefined,
+      statusDetails: e.statusDetails,
+    };
+    console.error(`[stt] meeting=${meetingId} stream error detail:`, JSON.stringify(detail));
+    cb.onError?.(err);
+  });
+
+  stream.on("end", () => {
+    /* noop — Node will GC the writable side */
+  });
 
   return {
     pushAudio(pcm) {
-      if (closed) return;
-      frameCount++;
-      if (frameCount % 20 === 1) {
-        console.log(`[stt] meeting=${meetingId} pushed audio batch=${frameCount} bytes=${pcm.length}`);
+      try {
+        for (let off = 0; off < pcm.length; off += MAX_CHUNK_BYTES) {
+          const end = Math.min(off + MAX_CHUNK_BYTES, pcm.length);
+          stream.write({ audio: pcm.subarray(off, end) });
+        }
+        frameCount++;
+        if (frameCount % 20 === 1) {
+          console.log(
+            `[stt] meeting=${meetingId} pushed audio batch=${frameCount} bytes=${pcm.length}`,
+          );
+        }
+      } catch (err) {
+        cb.onError?.(err as Error);
       }
-      if (!session || !opened) {
-        pending.push(pcm);
-        // Cap the pre-handshake buffer at ~10 s of audio so a hung handshake
-        // doesn't grow memory unboundedly.
-        while (pending.length > 100) pending.shift();
-        return;
-      }
-      writeAudio(pcm);
     },
     close() {
-      closed = true;
       try {
-        session?.close();
+        (stream as unknown as Writable).end();
       } catch {
         /* noop */
       }
@@ -233,7 +185,28 @@ export function openSttSession(meetingId: string, cb: SttCallbacks): SttSession 
   };
 }
 
-function detectLang(text: string): TranscriptLine["lang"] {
-  // Hebrew block: U+0590..U+05FF. If any Hebrew letter present, call it `he`.
-  return /[֐-׿]/.test(text) ? "he" : "en";
+function formatT(offset: SpeechDuration | undefined): string {
+  if (!offset) return "00:00";
+  const sec = Number(offset.seconds ?? 0);
+  const m = Math.floor(sec / 60).toString().padStart(2, "0");
+  const s = (sec % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+interface SpeechWord {
+  speakerLabel?: string;
+}
+interface SpeechAlternative {
+  transcript?: string;
+  words?: SpeechWord[];
+}
+interface SpeechResult {
+  alternatives?: SpeechAlternative[];
+  isFinal?: boolean;
+  languageCode?: string;
+  resultEndOffset?: SpeechDuration;
+}
+interface SpeechDuration {
+  seconds?: number | string | bigint;
+  nanos?: number;
 }

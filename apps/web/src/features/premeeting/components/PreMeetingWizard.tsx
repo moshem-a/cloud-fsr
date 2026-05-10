@@ -1,6 +1,6 @@
 import { Button, Stepper, useToast } from "@scoach/ui";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { preMeetingApi } from "../api.ts";
 import { usePreMeetingStore } from "../store.ts";
@@ -17,11 +17,28 @@ export interface PreMeetingWizardProps {
 }
 
 export function PreMeetingWizard({ meetingId }: PreMeetingWizardProps) {
-  const { step, setStep, client, title, stage, goal, language, hintTone, reset } = usePreMeetingStore();
+  const { step, setStep, hydrated, hydrateFromMeeting, client, title, stage, goal, language, hintTone, reset } = usePreMeetingStore();
   const nav = useNavigate();
   const toast = useToast();
+  const [loading, setLoading] = useState(!hydrated);
 
-  useEffect(() => () => reset(), [reset]);
+  useEffect(() => {
+    let cancelled = false;
+    preMeetingApi.fetchMeeting(meetingId).then((m) => {
+      if (cancelled) return;
+      if (m) {
+        hydrateFromMeeting(m);
+      }
+      setLoading(false);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId]);
+
+  useEffect(() => () => reset(), []);
 
   const canGoNext =
     (step === 0 && client.trim() && title.trim()) ||
@@ -55,14 +72,20 @@ export function PreMeetingWizard({ meetingId }: PreMeetingWizardProps) {
     }
     if (step < 3) {
       setStep((step + 1) as 0 | 1 | 2 | 3);
-    } else {
-      // Step 4 → start listening
-      nav({ to: "/meetings/$id/live", params: { id: meetingId } });
     }
   }
 
-  // Suppress unused warning while hintTone isn't sent yet (Sprint 4 wires it)
   void hintTone;
+
+  if (loading) {
+    return (
+      <div className="setup">
+        <div style={{ padding: 48, textAlign: "center", color: "var(--text-3)" }}>
+          Loading meeting setup...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="setup">
@@ -82,7 +105,7 @@ export function PreMeetingWizard({ meetingId }: PreMeetingWizardProps) {
           {step === 0 && <Step1Client />}
           {step === 1 && <Step2GoalLanguage />}
           {step === 2 && <Step3Context meetingId={meetingId} />}
-          {step === 3 && <Step4Ready />}
+          {step === 3 && <Step4Ready meetingId={meetingId} />}
         </main>
 
         <PreviewRail />
@@ -96,9 +119,11 @@ export function PreMeetingWizard({ meetingId }: PreMeetingWizardProps) {
         >
           Back
         </Button>
-        <Button variant="primary" onClick={persistAndAdvance} disabled={!canGoNext}>
-          {step === 3 ? "Start listening →" : "Next"}
-        </Button>
+        {step < 3 && (
+          <Button variant="primary" onClick={persistAndAdvance} disabled={!canGoNext}>
+            Next
+          </Button>
+        )}
       </footer>
     </div>
   );

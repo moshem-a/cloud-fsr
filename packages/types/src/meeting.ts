@@ -4,7 +4,7 @@ export type MeetingStage = "Intro" | "Discovery" | "Qualification" | "Negotiatio
 export type SpeakerSide = "client" | "rep";
 export type LangCode = "en" | "he";
 export type Sentiment = "buying" | "concern" | "positive" | "neutral";
-export type HintCategory = "Competitive" | "Problem→Solution" | "Commercial" | "Positive";
+export type HintCategory = "Competitive" | "Problem→Solution" | "Commercial" | "Positive" | "Objection" | "Redirect";
 export type HintColor = "blue" | "red" | "yellow" | "green";
 export type DealHealth = "hot" | "warm" | "cool" | "cold";
 
@@ -40,6 +40,20 @@ export interface TranscriptLine {
   isFinal: boolean;
 }
 
+export interface ComparisonSide {
+  name: string;
+  points: string[];
+  verdict?: "strong" | "weak" | "neutral";
+}
+
+export interface ComparisonTable {
+  /** e.g. "Bedrock vs Vertex AI Model Garden" */
+  topic: string;
+  left: ComparisonSide;
+  right: ComparisonSide;
+  recommendation?: string;
+}
+
 export interface Hint {
   id: UUID;
   title: string;
@@ -51,6 +65,12 @@ export interface Hint {
   confidence: number;
   timestamp: string;
   actedOn?: boolean;
+  /** When the hint compares two products (e.g. competitor vs GCP), the model
+   * may include a structured table for side-by-side rendering. */
+  comparisonTable?: ComparisonTable;
+  /** "high" = triggered by a competitor mention or comparison question. UI
+   * applies a red left rail to the card. */
+  priority?: "normal" | "high";
 }
 
 export interface SentimentEvent {
@@ -63,6 +83,9 @@ export interface SentimentSample {
   at: number;
   value: number;
   event?: SentimentEvent;
+  /** Which side of the conversation the sentiment was measured on. Default
+   * "all" for legacy combined samples. */
+  speaker?: "rep" | "client" | "all";
 }
 
 export type ContextItemKind = "url" | "doc" | "case";
@@ -93,6 +116,13 @@ export interface ContextInsight {
 export interface RepNote {
   t: string;
   text: string;
+  source?: "manual" | "auto";
+}
+
+export interface LiveTip {
+  id: UUID;
+  text: string;
+  at: number;
 }
 
 export interface Meeting {
@@ -137,6 +167,7 @@ export interface HistoryItem {
   stage: MeetingStage;
   /** Live state — drives whether the row links to /live (resume) or /summary. */
   status?: "draft" | "live" | "ended" | "summarized";
+  scheduledAt?: ISO8601;
   score: number;
   sentiment: Sentiment;
   tags: string[];
@@ -179,6 +210,10 @@ export interface InternalSummary {
   needs: { stated: string[]; actual: string[] };
   actionItems: ActionItem[];
   topMoments: { t: string; type: string; quote: string }[];
+  hintsSurfaced?: number;
+  hintsActed?: number;
+  sentimentDelta?: number;
+  sentimentAvg?: number;
 }
 
 export interface ClientEmail {
@@ -187,6 +222,15 @@ export interface ClientEmail {
   body: string[];
   signoff: string;
   tone: "formal" | "warm" | "brief";
+  references?: ReferenceLink[];
+  /** When set, takes precedence over greeting+body+signoff for display/send.
+   * Set by the user via the editable textarea + Save. Unset = render structured. */
+  bodyText?: string;
+  /** Set when the user has manually edited the email — guards against accidental
+   * regenerate clobbering. */
+  edited?: boolean;
+  /** ISO timestamp of last manual edit. */
+  editedAt?: ISO8601;
 }
 
 export interface MeetingSummary {

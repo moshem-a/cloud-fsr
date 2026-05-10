@@ -1,14 +1,24 @@
 import type { Hint, TranscriptLine } from "@scoach/types";
+import { randomUUID } from "node:crypto";
 
 import { meetingsRepo } from "../repos/meetings.repo.ts";
 import { liveRepo } from "../repos/live.repo.ts";
 import {
+  analyzeScreenFrame,
   classifySentiment,
-  extractEntities,
+  detectLang,
+  extractActionItem,
+  generateFollowups,
   generateHint,
+  generateLiveTip,
+  generateQuickAnswer,
+  hasActionItemPattern,
   isGeminiEnabled,
+  regexEntities,
 } from "./gemini.service.ts";
-import { isSttEnabled, openSttSession, type SttSession } from "./stt.service.ts";
+import { isSttEnabled, openSttSession, type SpeakerRole, type SttSession } from "./stt.service.ts";
+
+export type { SpeakerRole };
 
 /**
  * Per-meeting audio session manager.
@@ -26,23 +36,53 @@ import { isSttEnabled, openSttSession, type SttSession } from "./stt.service.ts"
  * Periodic sentiment classification writes to meetings/:id/sentiment/{at}.
  */
 
-const SENTIMENT_TICK_MS = 10_000;
+const SENTIMENT_TICK_MS = 20_000;
+const FOLLOWUPS_TICK_MS = 60_000;
+const TIPS_TICK_MS = 25_000;
 const ROLLING_WINDOW = 12;
+// Hint heuristic: fire a hint cycle on every final transcript line. Dedup via
+// recentHintTitles prevents flooding. Time gate (HINT_TIME_MS) still applies.
+const HINT_FINAL_BATCH = 1;
+const HINT_TIME_MS = 10_000;
+// Immediate-fire patterns: competitor mentions + comparison-style questions.
+// When matched in a final transcript line, fire a hint cycle right away with
+// priority="high" so the UI surfaces a comparison card the rep can use.
+// English-only: competitor product names stay English even in Hebrew calls.
+const HIGH_PRIORITY_REGEX = /\b(Bedrock|SageMaker|Snowflake|Databricks|OpenAI|Anthropic\s+direct|Azure\s+OpenAI|AKS|EKS|Athena|Redshift|how\s+does|what\s+about|compared?\s+to|versus|\bvs\.?\b|why\s+(not|should)|difference\s+between|too\s+expensive|not\s+sure|concerned|worried|problem\s+with|won't\s+work|can't\s+afford|not\s+in\s+budget|we're\s+happy\s+with|already\s+using|no\s+need|not\s+interested|יקר\s+מדי|לא\s+בטוח|בעיה\s+עם|לא\s+צריך)\b/i;
 // Sessions are evicted after this much idle time (no audio frames received).
 // Cloud Run instances cycle on inactivity; tune separately.
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface ActiveSession {
   meetingId: string;
-  stt: SttSession;
+  cachedGoal: string;
+  // Two STT streams per meeting — one for mic (rep), one for tab (client).
+  stt: { rep: SttSession; client: SttSession };
+  // Per-stream reopen + failure state. Each stream can fail independently.
+  lastReopenAt: { rep: number; client: number };
+  permanentlyFailed: { rep: boolean; client: boolean };
   rollingTranscript: TranscriptLine[];
   seenEntities: Set<string>;
   sentimentTick: NodeJS.Timeout | null;
+  followupsTick: NodeJS.Timeout | null;
+  tipsTick: NodeJS.Timeout | null;
+  recentTips: string[];
   lastActivityAt: number;
   scheduleStartedAt: number;
-  lastReopenAt: number;
-  permanentlyFailed: boolean;
+  // Hint trigger state
+  finalsSinceLastHint: number;
+  lastHintAt: number;
+  hintInFlight: boolean;
+  recentHintTitles: string[];
+  // Partial write throttle
+  lastPartialWriteAt: number;
+  // Quick answer debounce
+  lastQuickAnswerAt: number;
+  // Action item debounce (covers both rep commitments and client requests)
+  lastActionItemAt: number;
 }
+
+const NOOP_STT: SttSession = { pushAudio: () => {}, close: () => {} };
 
 const sessions = new Map<string, ActiveSession>();
 
@@ -65,67 +105,110 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
 
   const session: ActiveSession = {
     meetingId,
-    stt: null as unknown as SttSession, // assigned below
+    cachedGoal: "",
+    stt: { rep: NOOP_STT, client: NOOP_STT },
+    lastReopenAt: { rep: 0, client: 0 },
+    permanentlyFailed: { rep: false, client: false },
     rollingTranscript: [],
     seenEntities: new Set(),
     sentimentTick: null,
+    followupsTick: null,
+    tipsTick: null,
+    recentTips: [],
     lastActivityAt: Date.now(),
     scheduleStartedAt: Date.now(),
-    lastReopenAt: 0,
-    permanentlyFailed: false,
+    finalsSinceLastHint: 0,
+    lastHintAt: 0,
+    hintInFlight: false,
+    recentHintTitles: [],
+    lastPartialWriteAt: 0,
+    lastQuickAnswerAt: 0,
+    lastActionItemAt: 0,
   };
+
+  // Cache meeting goal once — avoids a Firestore read on every hint/tip/answer cycle.
+  void meetingsRepo.get(meetingId).then((m) => {
+    session.cachedGoal = m?.goal ?? "";
+  }).catch(() => {});
 
   if (isSttEnabled()) {
     // Clear any stale error banner from a previous failed attempt on this
     // meeting (e.g. before the latest deploy that fixed the config).
     void liveRepo.writeLiveState(meetingId, { sttError: "" }).catch(() => {});
 
-    const openStream = () => openSttSession(meetingId, {
-      onPartial: () => {
-        // Sprint 6: write to a separate "partial" doc that overwrites itself.
-      },
-      onFinal: (line) => {
-        void handleFinalLine(session, line);
-      },
-      onError: (err) => {
-        // Once flagged permanently dead, swallow every subsequent error event
-        // (including the cascade of "write after stream destroyed" from
-        // in-flight audio frames). No reopens, no log spam.
-        if (session.permanentlyFailed) return;
-        console.warn(`[audio-session] STT error for ${meetingId}:`, err.message);
-        if (/INVALID_ARGUMENT|PERMISSION_DENIED|NOT_FOUND|UNAUTHENTICATED/.test(err.message)) {
-          session.permanentlyFailed = true;
-          session.lastReopenAt = Date.now(); // gate the evict-and-recreate retry window
-          console.error(`[audio-session] STT permanently failed for ${meetingId}, not reopening: ${err.message}`);
-          void liveRepo.writeLiveState(meetingId, { sttError: err.message }).catch(() => {});
-          return;
-        }
-        // Transient: auto-reopen, throttled to once per 2s.
-        const now = Date.now();
-        if (now - session.lastReopenAt < 2_000) return;
-        session.lastReopenAt = now;
-        try {
-          session.stt = openStream();
-          console.log(`[audio-session] reopened STT stream for ${meetingId}`);
-        } catch (e) {
-          console.warn(`[audio-session] failed to reopen STT for ${meetingId}:`, (e as Error).message);
-        }
-      },
-    });
-    session.stt = openStream();
-  } else {
-    // Stub session: no real STT, no callbacks. Audio is dropped.
+    const openStream = (role: SpeakerRole): SttSession =>
+      openSttSession(meetingId, role, {
+        onPartial: (line) => {
+          // Throttled write to a single overwrite-self doc so the FE can show
+          // the live speculative text. Throttle is per-meeting (shared across
+          // both sources) — the most recent partial wins, regardless of who.
+          const now = Date.now();
+          if (now - session.lastPartialWriteAt < 400) return;
+          session.lastPartialWriteAt = now;
+          void liveRepo.writePartial(meetingId, line).catch((err) => {
+            console.warn(`[audio-session] writePartial failed: ${(err as Error).message}`);
+          });
+        },
+        onFinal: (line) => {
+          // Clear the live partial doc — the final has landed in the transcript
+          // collection and the partial is now stale.
+          void liveRepo.clearPartial(meetingId).catch(() => {});
+          void handleFinalLine(session, line);
+        },
+        onError: (err) => {
+          if (session.permanentlyFailed[role]) return;
+          console.warn(`[audio-session] STT error for ${meetingId} (${role}):`, err.message);
+          if (/INVALID_ARGUMENT|PERMISSION_DENIED|NOT_FOUND|UNAUTHENTICATED/.test(err.message)) {
+            session.permanentlyFailed[role] = true;
+            session.lastReopenAt[role] = Date.now();
+            console.error(
+              `[audio-session] STT permanently failed for ${meetingId} (${role}), not reopening: ${err.message}`,
+            );
+            // Surface only if BOTH streams are dead — one stream still working
+            // is enough to use the meeting. (Mic-denied users still see client.)
+            if (session.permanentlyFailed.rep && session.permanentlyFailed.client) {
+              void liveRepo
+                .writeLiveState(meetingId, { sttError: err.message })
+                .catch(() => {});
+            }
+            return;
+          }
+          // Transient: auto-reopen this stream only, throttled to once per 2s.
+          const now = Date.now();
+          if (now - session.lastReopenAt[role] < 2_000) return;
+          session.lastReopenAt[role] = now;
+          try {
+            session.stt[role] = openStream(role);
+            console.log(`[audio-session] reopened STT stream for ${meetingId} (${role})`);
+          } catch (e) {
+            console.warn(
+              `[audio-session] failed to reopen STT for ${meetingId} (${role}):`,
+              (e as Error).message,
+            );
+          }
+        },
+      });
+
     session.stt = {
-      pushAudio: () => {},
-      close: () => {},
+      rep: openStream("rep"),
+      client: openStream("client"),
     };
   }
 
-  // Sentiment loop
+  // Sentiment + Followups loops (Gemini-backed)
   if (isGeminiEnabled()) {
     session.sentimentTick = setInterval(() => {
       void runSentimentTick(session);
     }, SENTIMENT_TICK_MS);
+    session.followupsTick = setInterval(() => {
+      void runFollowupsTick(session);
+    }, FOLLOWUPS_TICK_MS);
+    session.tipsTick = setInterval(() => {
+      void runTipsTick(session);
+    }, TIPS_TICK_MS);
+    console.log(`[audio-session] started sentiment+followups+tips timers for ${meetingId}`);
+  } else {
+    console.warn(`[audio-session] Gemini disabled (no GCP_PROJECT_ID), skipping hint/sentiment/followups for ${meetingId}`);
   }
 
   sessions.set(meetingId, session);
@@ -136,78 +219,331 @@ export function stopSession(meetingId: string): void {
   const s = sessions.get(meetingId);
   if (!s) return;
   if (s.sentimentTick) clearInterval(s.sentimentTick);
-  try {
-    s.stt.close();
-  } catch {
-    /* noop */
+  if (s.followupsTick) clearInterval(s.followupsTick);
+  if (s.tipsTick) clearInterval(s.tipsTick);
+  for (const role of ["rep", "client"] as const) {
+    try {
+      s.stt[role].close();
+    } catch {
+      /* noop */
+    }
   }
   sessions.delete(meetingId);
 }
 
-export function pushAudio(meetingId: string, pcm: Buffer): void {
+export function pushAudio(meetingId: string, role: SpeakerRole, pcm: Buffer): void {
   let s = getOrCreateSession(meetingId);
-  if (s.permanentlyFailed) {
-    // Evict and recreate so a deploy that fixes the underlying issue heals
-    // automatically. Throttled to once per 30 s to avoid hot-looping when
-    // the failure mode persists across the deploy.
-    const sinceFail = Date.now() - s.lastReopenAt;
+  if (s.permanentlyFailed[role]) {
+    // Evict and recreate ONLY this stream after a 30s cooldown — the other
+    // stream might still be healthy, so we leave it alone.
+    const sinceFail = Date.now() - s.lastReopenAt[role];
     if (sinceFail < 30_000) return;
-    console.log(`[audio-session] evicting failed session for ${meetingId}, recreating`);
-    stopSession(meetingId);
-    void liveRepo.writeLiveState(meetingId, { sttError: "" }).catch(() => {});
-    s = getOrCreateSession(meetingId);
+    console.log(`[audio-session] evicting failed ${role} stream for ${meetingId}, recreating`);
+    try {
+      s.stt[role].close();
+    } catch {
+      /* noop */
+    }
+    s.permanentlyFailed[role] = false;
+    s.lastReopenAt[role] = Date.now();
+    // If both were dead before, clear the FE error banner.
+    if (!s.permanentlyFailed.rep && !s.permanentlyFailed.client) {
+      void liveRepo.writeLiveState(meetingId, { sttError: "" }).catch(() => {});
+    }
+    s.stt[role] = openSttSession(meetingId, role, {
+      onPartial: (line) => {
+        const now = Date.now();
+        if (now - s.lastPartialWriteAt < 400) return;
+        s.lastPartialWriteAt = now;
+        void liveRepo.writePartial(meetingId, line).catch(() => {});
+      },
+      onFinal: (line) => {
+        void liveRepo.clearPartial(meetingId).catch(() => {});
+        void handleFinalLine(s, line);
+      },
+      onError: (err) => {
+        console.warn(`[audio-session] STT error for ${meetingId} (${role}) after recreate:`, err.message);
+      },
+    });
   }
-  s.stt.pushAudio(pcm);
+  s.stt[role].pushAudio(pcm);
 }
 
 async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Promise<void> {
-  const tFinal = Date.now();
   session.rollingTranscript.push(line);
   // 1. Persist transcript line
   await liveRepo.writeTranscript(session.meetingId, line);
 
-  // 2. Entity extraction
-  const tEntStart = Date.now();
-  const entities = await extractEntities(line.text);
-  const fresh = entities.filter((e) => !session.seenEntities.has(e));
-  for (const e of fresh) session.seenEntities.add(e);
-  const tEntEnd = Date.now();
+  // 2. Entity extraction — regex-only for speed (no Gemini call).
+  for (const e of regexEntities(line.text)) session.seenEntities.add(e);
 
-  // 3. Hint generation if new entities and Gemini enabled
-  if (fresh.length > 0 && isGeminiEnabled()) {
-    const tHintStart = Date.now();
-    const meeting = await meetingsRepo.get(session.meetingId);
+  // 3. Hint generation — fires immediately on competitor/comparison signals,
+  // or after every HINT_FINAL_BATCH transcripts OR HINT_TIME_MS elapsed.
+  session.finalsSinceLastHint += 1;
+  const sinceLastHint = Date.now() - session.lastHintAt;
+  const highPriority = HIGH_PRIORITY_REGEX.test(line.text);
+  const shouldHint =
+    isGeminiEnabled() &&
+    !session.hintInFlight &&
+    (highPriority || session.rollingTranscript.length >= 2) &&
+    (highPriority || session.finalsSinceLastHint >= HINT_FINAL_BATCH || sinceLastHint >= HINT_TIME_MS);
+  if (shouldHint) {
+    session.hintInFlight = true;
+    session.finalsSinceLastHint = 0;
+    session.lastHintAt = Date.now();
+    void runHintCycle(session, highPriority ? "high" : "normal").finally(() => {
+      session.hintInFlight = false;
+    });
+  }
+
+  // 4. Quick answer — when the client asks a question, generate an instant answer
+  if (line.speaker === "client" && isQuestionLine(line.text) && isGeminiEnabled()) {
+    void generateAndWriteQuickAnswer(session, line).catch(() => {});
+  }
+
+  // 5. Auto-note — detect action items from BOTH speakers (rep commitments + client requests)
+  if (hasActionItemPattern(line.text) && isGeminiEnabled()) {
+    void detectAndWriteActionItem(session, line).catch(() => {});
+  }
+}
+
+async function runHintCycle(session: ActiveSession, priority: "normal" | "high" = "normal"): Promise<void> {
+  const t0 = Date.now();
+  try {
+    const lang = detectLang(session.rollingTranscript);
     const hint: Hint | null = await generateHint({
-      meetingGoal: meeting?.goal ?? "",
+      meetingGoal: session.cachedGoal,
       contextSummary: "",
       rollingTranscript: session.rollingTranscript.slice(-ROLLING_WINDOW),
-      newEntities: fresh,
+      lang,
+      priority,
+      recentHintTitles: session.recentHintTitles,
     });
-    const tHintEnd = Date.now();
+    if (hint) {
+      const isDuplicate = session.recentHintTitles.some(
+        (t) => t.toLowerCase() === hint.title.toLowerCase(),
+      );
+      if (!isDuplicate) {
+        await liveRepo.writeHint(session.meetingId, hint);
+        session.recentHintTitles = [...session.recentHintTitles.slice(-7), hint.title];
+      }
+    }
+    console.log(
+      `[audio-session] meeting=${session.meetingId} hintCycle=${Date.now() - t0}ms hinted=${!!hint} priority=${priority} hasCompare=${!!hint?.comparisonTable} transcriptLen=${session.rollingTranscript.length}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} hint cycle error: ${(err as Error).message}`,
+    );
+  }
+}
+
+// ---------- Question detection + quick answer ----------
+const QUESTION_REGEX = /(\?|^(how|what|why|when|where|which|can|could|does|do|is|are|will|would|should|have|has|who|tell\s+me|explain|מה|למה|איך|מתי|איפה|האם|כמה|אילו)\b)/i;
+
+function isQuestionLine(text: string): boolean {
+  return QUESTION_REGEX.test(text.trim()) && text.trim().length > 15;
+}
+
+async function generateAndWriteQuickAnswer(session: ActiveSession, line: TranscriptLine): Promise<void> {
+  const now = Date.now();
+  if (now - session.lastQuickAnswerAt < 5_000) return;
+  session.lastQuickAnswerAt = now;
+  const t0 = Date.now();
+  try {
+    const lang = detectLang(session.rollingTranscript);
+    const hint = await generateQuickAnswer({
+      question: line.text,
+      rollingTranscript: session.rollingTranscript.slice(-6),
+      meetingGoal: session.cachedGoal,
+      lang,
+    });
     if (hint) {
       await liveRepo.writeHint(session.meetingId, hint);
     }
     console.log(
-      `[audio-session] meeting=${session.meetingId} hintLatency=${
-        tHintEnd - tFinal
-      }ms entityLatency=${tEntEnd - tEntStart}ms hintLlm=${
-        tHintEnd - tHintStart
-      }ms freshEntities=${fresh.length} hinted=${!!hint}`,
+      `[audio-session] meeting=${session.meetingId} quickAnswer=${Date.now() - t0}ms answered=${!!hint}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} quickAnswer error: ${(err as Error).message}`,
+    );
+  }
+}
+
+async function detectAndWriteActionItem(session: ActiveSession, line: TranscriptLine): Promise<void> {
+  const now = Date.now();
+  if (now - session.lastActionItemAt < 8_000) return;
+  session.lastActionItemAt = now;
+  const t0 = Date.now();
+  try {
+    const lang = detectLang(session.rollingTranscript);
+    const noteText = await extractActionItem(line.text, line.speaker, lang);
+    if (noteText) {
+      const note = { t: line.t, text: noteText, source: "auto" as const };
+      await liveRepo.writeAutoNote(session.meetingId, note);
+      void meetingsRepo.get(session.meetingId).then((meeting) => {
+        if (meeting) {
+          void meetingsRepo.patch(session.meetingId, {
+            notes: [...(meeting.notes ?? []), note],
+          });
+        }
+      }).catch(() => {});
+    }
+    console.log(
+      `[audio-session] meeting=${session.meetingId} actionItem=${Date.now() - t0}ms found=${!!noteText} speaker=${line.speaker}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} actionItem error: ${(err as Error).message}`,
     );
   }
 }
 
 async function runSentimentTick(session: ActiveSession): Promise<void> {
-  const window = session.rollingTranscript
-    .slice(-ROLLING_WINDOW)
-    .map((l) => l.text)
-    .join(" ");
-  if (!window) return;
-  const cls = await classifySentiment(window);
+  if (session.rollingTranscript.length === 0) return;
   const at = Math.floor((Date.now() - session.scheduleStartedAt) / SENTIMENT_TICK_MS);
-  await liveRepo.writeSentiment(session.meetingId, {
-    at,
-    value: cls.value,
-    ...(cls.label ? { event: { at, label: cls.label, kind: cls.kind } } : {}),
-  });
+  const recent = session.rollingTranscript.slice(-ROLLING_WINDOW);
+
+  // Build per-speaker windows so we can show two sentiment graphs (rep + client).
+  // Falls back to the combined window if one side hasn't spoken in this slice.
+  const repText = recent.filter((l) => l.speaker === "rep").map((l) => l.text).join(" ");
+  const clientText = recent.filter((l) => l.speaker === "client").map((l) => l.text).join(" ");
+  const allText = recent.map((l) => l.text).join(" ");
+
+  const t0 = Date.now();
+  const tasks: Array<Promise<void>> = [];
+
+  if (allText) {
+    tasks.push(classifyAndWrite(session, at, allText, "all"));
+  }
+  if (repText) {
+    tasks.push(classifyAndWrite(session, at, repText, "rep"));
+  }
+  if (clientText) {
+    tasks.push(classifyAndWrite(session, at, clientText, "client"));
+  }
+  try {
+    await Promise.all(tasks);
+    console.log(
+      `[audio-session] meeting=${session.meetingId} sentiment-tick rep=${!!repText} client=${!!clientText} latency=${Date.now() - t0}ms`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} sentiment tick error: ${(err as Error).message}`,
+    );
+  }
+}
+
+async function classifyAndWrite(
+  session: ActiveSession,
+  at: number,
+  text: string,
+  speaker: "rep" | "client" | "all",
+): Promise<void> {
+  try {
+    const cls = await classifySentiment(text);
+    await liveRepo.writeSentiment(session.meetingId, {
+      at,
+      value: cls.value,
+      speaker,
+      ...(cls.label ? { event: { at, label: cls.label, kind: cls.kind } } : {}),
+    });
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} sentiment(${speaker}) failed: ${(err as Error).message}`,
+    );
+  }
+}
+
+async function runFollowupsTick(session: ActiveSession): Promise<void> {
+  if (session.rollingTranscript.length === 0) return;
+  const t0 = Date.now();
+  try {
+    const lang = detectLang(session.rollingTranscript);
+    const items = await generateFollowups(session.rollingTranscript, session.cachedGoal, lang);
+    if (items.length > 0) {
+      await liveRepo.writeFollowups(session.meetingId, items);
+    }
+    console.log(
+      `[audio-session] meeting=${session.meetingId} followups count=${items.length} latency=${Date.now() - t0}ms`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} followups tick error: ${(err as Error).message}`,
+    );
+  }
+}
+
+async function runTipsTick(session: ActiveSession): Promise<void> {
+  if (session.rollingTranscript.length < 4) return;
+  const t0 = Date.now();
+  try {
+    const lang = detectLang(session.rollingTranscript);
+    const tipText = await generateLiveTip({
+      rollingTranscript: session.rollingTranscript.slice(-ROLLING_WINDOW),
+      meetingGoal: session.cachedGoal,
+      lang,
+      existingTips: session.recentTips,
+    });
+    if (tipText) {
+      const tip = { id: randomUUID(), text: tipText, at: Date.now() };
+      await liveRepo.writeTip(session.meetingId, tip);
+      session.recentTips = [...session.recentTips.slice(-4), tipText];
+    }
+    console.log(
+      `[audio-session] meeting=${session.meetingId} tipsTick=${Date.now() - t0}ms tipped=${!!tipText}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${session.meetingId} tips tick error: ${(err as Error).message}`,
+    );
+  }
+}
+
+// ---------- Screen frame analysis ----------
+const screenFrameThrottle = new Map<string, number>();
+const SCREEN_FRAME_COOLDOWN_MS = 15_000;
+
+export async function pushScreenFrame(meetingId: string, imageBuffer: Buffer): Promise<void> {
+  if (!isGeminiEnabled()) return;
+  const now = Date.now();
+  const lastAt = screenFrameThrottle.get(meetingId) ?? 0;
+  if (now - lastAt < SCREEN_FRAME_COOLDOWN_MS) return;
+  screenFrameThrottle.set(meetingId, now);
+
+  const t0 = Date.now();
+  try {
+    const result = await analyzeScreenFrame(imageBuffer);
+    if (!result) return;
+
+    const allFindings = [
+      ...result.findings,
+      ...result.products.map((p) => `Product: ${p}`),
+      ...result.competitors.map((c) => `Competitor: ${c}`),
+      ...result.pricing.map((p) => `Pricing: ${p}`),
+    ];
+    if (allFindings.length === 0) return;
+
+    const session = sessions.get(meetingId);
+    const hint: Hint = {
+      id: randomUUID(),
+      title: "Screen insight",
+      category: result.competitors.length > 0 ? "Competitive" : "Problem→Solution",
+      color: result.competitors.length > 0 ? "blue" : "green",
+      summary: allFindings.slice(0, 3).join(". "),
+      proofPoints: allFindings.slice(0, 5),
+      sources: ["screen-share"],
+      confidence: 0.8,
+      timestamp: session?.rollingTranscript[session.rollingTranscript.length - 1]?.t ?? "00:00",
+    };
+    await liveRepo.writeHint(meetingId, hint);
+    console.log(
+      `[audio-session] meeting=${meetingId} screenFrame=${Date.now() - t0}ms findings=${allFindings.length}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[audio-session] meeting=${meetingId} screenFrame error: ${(err as Error).message}`,
+    );
+  }
 }

@@ -8,9 +8,12 @@ import {
   Play,
   Stop,
 } from "@scoach/ui/icons";
+import { Link } from "@tanstack/react-router";
 
 import { applyTheme, getStoredTheme, setStoredTheme, type Theme } from "../../../../lib/theme.ts";
+import { useConfirmLeaveLiveMeeting } from "../hooks/useConfirmLeaveLiveMeeting.ts";
 import { type LangMode, useLiveMeetingStore } from "../store.ts";
+import { resetLiveLayout } from "./ResizableMain.tsx";
 
 export interface AppHeaderProps {
   meeting: Meeting;
@@ -53,19 +56,20 @@ function elapsed(startedAt: number | null) {
 
 export function AppHeader({ meeting, onToggleListening, onEnd }: AppHeaderProps) {
   const { listening, muted, langMode, latencyMs, startedAt, setLangMode, setMuted } = useLiveMeetingStore();
+  const confirmLeave = useConfirmLeaveLiveMeeting();
 
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <div className="brand">
-          <img src="/supercloud-mark.svg" alt="SuperCloud" width={28} height={28} />
+        <Link to="/dashboard" className="brand brand-link" onClick={confirmLeave}>
+          <img src="/supercloud-mark.svg" alt="Sally" width={28} height={28} />
           <div className="brand-text">
-            <div className="brand-name">SuperCloud</div>
+            <div className="brand-name">Sally</div>
             <div className="brand-sub">
-              Sales Coach <span className="brand-tag">Internal</span>
+              Your AI assistant <span className="brand-tag">Internal</span>
             </div>
           </div>
-        </div>
+        </Link>
 
         <div className="meeting-chip">
           <div className="meeting-chip-dot" />
@@ -122,6 +126,16 @@ export function AppHeader({ meeting, onToggleListening, onEnd }: AppHeaderProps)
 
         <button
           type="button"
+          className="ghost-btn"
+          onClick={resetLiveLayout}
+          title="Reset column layout to defaults"
+          style={{ fontSize: 11.5 }}
+        >
+          Reset layout
+        </button>
+
+        <button
+          type="button"
           className={`pill-btn ${muted ? "pill-muted" : ""}`}
           onClick={() => setMuted(!muted)}
         >
@@ -138,9 +152,6 @@ export function AppHeader({ meeting, onToggleListening, onEnd }: AppHeaderProps)
           <span>{listening ? "End meeting" : "Start listening"}</span>
         </button>
 
-        <div className="avatar-me" title="Noa Levi">
-          NL
-        </div>
       </div>
     </header>
   );

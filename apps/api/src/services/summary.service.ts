@@ -34,13 +34,46 @@ Strict JSON output:
   "needs": { "stated": ["..."], "actual": ["..."] },
   "actionItems": [{"who":"...","what":"...","due":"YYYY-MM-DD"}],
   "topMoments": [{"t":"MM:SS","type":"...","quote":"..."}]
-}`;
+}
 
-const EMAIL_SYSTEM = `You are a client-facing sales rep. Write a follow-up email recapping a sales call.
+CRITICAL RULES:
+1. Use ONLY information that was ACTUALLY said in the transcript. Do NOT invent, guess, or fabricate details.
+2. If information for a field was not discussed, use an empty array [] or write "לא נדון" — do NOT fill with plausible guesses.
+3. Do NOT make up company names, product names, numbers, dates, or quotes not present in the transcript.
+4. The transcript may be in Hebrew. Some words may be unclear due to speech recognition — note uncertainty rather than guessing.
+5. For "topMoments", only include quotes that appear verbatim or near-verbatim in the transcript.
+6. An honest incomplete summary is far better than a fabricated complete one.`;
+
+const EMAIL_SYSTEM = `You are a Google Cloud sales rep writing a professional follow-up email after a customer meeting.
+
+ALWAYS WRITE THE EMAIL IN ENGLISH, regardless of the language of the meeting transcript. Use idiomatic professional English suitable for a customer-facing recap.
+
+The email must be something the rep can immediately send to the client. Include:
+1. A warm opening thanking them for their time.
+2. A concise summary of the key topics discussed (2-4 paragraphs).
+3. A clear "Action Items / Next Steps" section — bulleted list with owner + deadline where possible.
+4. A "Relevant Resources" section — include 3-6 relevant Google Cloud documentation links based on the GCP products/services actually discussed in the meeting. Use real cloud.google.com URLs. Format each as: "- **Title**: URL".
+5. A professional sign-off.
+
 Tone is one of: formal | warm | brief.
+- formal: professional language, full sentences, structured headers.
+- warm: friendly but professional, conversational, still structured.
+- brief: short paragraphs, bullets over prose, minimal filler.
+
 Strict JSON output:
-{ "subject":"...", "greeting":"...", "body":["...","..."], "signoff":"..." }
-The email MUST contain no internal scoring, no competitive analysis, and no proprietary numbers.`;
+{
+  "subject": "<email subject line>",
+  "greeting": "<opening line>",
+  "body": ["<paragraph or section — use **bold** for headers>", "..."],
+  "signoff": "<closing line + name placeholder>",
+  "references": [{"title":"...","href":"https://cloud.google.com/...","source":"cloud.google.com"}, ...]
+}
+
+IMPORTANT:
+- The email MUST contain NO internal scoring, competitive analysis, or proprietary numbers.
+- Action items must come from the actual conversation, not invented.
+- Reference links must be real cloud.google.com URLs relevant to the discussion topics.
+- Never include placeholder text like "[insert here]" — write complete content.`;
 
 function transcriptToText(transcript: TranscriptLine[]): string {
   return transcript
@@ -51,7 +84,7 @@ function transcriptToText(transcript: TranscriptLine[]): string {
 async function callPro<T>(systemPrompt: string, userPrompt: string): Promise<T> {
   const model = vertex().getGenerativeModel({
     model: MODEL,
-    generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+    generationConfig: { temperature: 0.2, maxOutputTokens: 4096, responseMimeType: "application/json" },
     systemInstruction: { role: "system", parts: [{ text: systemPrompt }] },
   });
   const resp = await model.generateContent({
@@ -96,37 +129,67 @@ export async function generateClientEmail(
   transcript: TranscriptLine[],
   tone: ClientEmail["tone"],
 ): Promise<ClientEmail> {
-  if (!isGeminiEnabled()) {
+  if (!isGeminiEnabled() || transcript.length === 0) {
     return { ...defaultClient(meeting), tone };
   }
   try {
-    const prompt = `Meeting: ${meeting.title} with ${meeting.account.name}.
+    const participants = meeting.participants.map((p) => `${p.name} (${p.role})`).join(", ");
+    const prompt = `Meeting: ${meeting.title} with ${meeting.account.name} (${meeting.stage}).
+Goal: ${meeting.goal ?? "(none stated)"}
+Participants: ${participants}
 Tone: ${tone}.
 Transcript:
 ${transcriptToText(transcript)}`;
-    const raw = await callPro<Partial<ClientEmail>>(EMAIL_SYSTEM, prompt);
+    const raw = await callPro<Partial<ClientEmail> & { references?: Array<{ title?: string; href?: string; source?: string }> }>(EMAIL_SYSTEM, prompt);
+    const refs = Array.isArray(raw.references)
+      ? raw.references
+          .filter((r) => r.title && r.href)
+          .map((r) => ({ title: r.title!, href: r.href!, source: r.source ?? "cloud.google.com" }))
+      : [];
     return {
       subject: raw.subject ?? `Recap — ${meeting.title}`,
       greeting: raw.greeting ?? `Hi ${meeting.account.contact ?? "team"},`,
       body: raw.body ?? [],
       signoff: raw.signoff ?? "Best,",
       tone,
+      references: refs.length > 0 ? refs : undefined,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[summary] generateClientEmail failed: ${(err as Error).message}`);
     return { ...defaultClient(meeting), tone };
   }
+}
+
+export interface SummaryExtras {
+  hintStats?: { total: number; acted: number };
+  sentimentData?: { values: number[]; lastKind: string };
 }
 
 export async function generateMeetingSummary(
   meeting: Meeting,
   transcript: TranscriptLine[],
+  extras?: SummaryExtras,
 ): Promise<MeetingSummary> {
   const startedAt = Date.now();
-  const fallback = !isGeminiEnabled();
+  const fallback = !isGeminiEnabled() || transcript.length === 0;
 
   const internal: InternalSummary = fallback
     ? defaultInternal()
     : await generateInternalSummary(meeting, transcript).catch(() => defaultInternal());
+
+  // Overlay real hint/sentiment stats from Firestore so the summary shows
+  // actual data instead of model-hallucinated numbers.
+  if (extras?.hintStats) {
+    internal.hintsSurfaced = extras.hintStats.total;
+    internal.hintsActed = extras.hintStats.acted;
+  }
+  if (extras?.sentimentData && extras.sentimentData.values.length > 0) {
+    const vals = extras.sentimentData.values;
+    const first = vals[0] ?? 50;
+    const last = vals[vals.length - 1] ?? 50;
+    internal.sentimentDelta = last - first;
+    internal.sentimentAvg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  }
 
   const client: ClientEmail = fallback
     ? defaultClient(meeting)
@@ -145,7 +208,7 @@ export async function generateMeetingSummary(
     },
     internal,
     client,
-    references: defaultReferences(),
+    references: client.references && client.references.length > 0 ? client.references : defaultReferences(),
     generatedAt: new Date().toISOString(),
     generationLatencyMs: Date.now() - startedAt,
   };
@@ -166,7 +229,7 @@ function defaultInternal(): InternalSummary {
   };
 }
 
-function defaultClient(meeting: Meeting): ClientEmail {
+export function defaultClient(meeting: Meeting): ClientEmail {
   return {
     subject: `Recap — ${meeting.title}`,
     greeting: `Hi ${meeting.account.contact ?? "team"},`,
@@ -179,11 +242,6 @@ function defaultClient(meeting: Meeting): ClientEmail {
   };
 }
 
-function defaultReferences() {
-  return [
-    { title: "Vertex AI Model Garden — overview", href: "https://cloud.google.com/model-garden", source: "cloud.google.com" },
-    { title: "Anthropic Claude on Vertex AI", href: "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude", source: "cloud.google.com" },
-    { title: "Regional endpoints for Vertex AI", href: "https://cloud.google.com/vertex-ai/docs/general/locations", source: "cloud.google.com" },
-    { title: "Vertex AI pricing & CUDs", href: "https://cloud.google.com/vertex-ai/pricing", source: "cloud.google.com" },
-  ];
+function defaultReferences(): import("@scoach/types").ReferenceLink[] {
+  return [];
 }

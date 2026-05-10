@@ -20,16 +20,29 @@ export interface LiveMeetingState {
   latencyMs: number | null;
   startedAt: number | null;
   sttError: string | null;
+  /** Live speculative text from STT — overwrites itself as the speaker talks.
+   * Cleared when the corresponding final transcript lands. */
+  livePartial: string | null;
 
   transcript: TranscriptLine[];
   hints: Hint[];
   followups: string[];
+  /** Time-ordered history of follow-up sets (newest last). Each set is the
+   * full list returned by the server at that tick. Used by FollowupList to
+   * show the latest set above and prior sets collapsed below. Cap at 8. */
+  followupSets: { items: string[]; at: number }[];
+  /** Combined sentiment series (legacy/global). */
   sentimentSeries: SentimentSample[];
+  /** Sentiment series filtered to only what the rep ("You") said. */
+  sentimentRep: SentimentSample[];
+  /** Sentiment series filtered to only what the client said. */
+  sentimentClient: SentimentSample[];
   sentimentEvents: SentimentEvent[];
 
   actedHintIds: Set<string>;
   pinnedHintIds: Set<string>;
   notes: RepNote[];
+  liveTips: { id: string; text: string; at: number }[];
 
   // setters
   reset: () => void;
@@ -41,10 +54,14 @@ export interface LiveMeetingState {
   setMeetingId: (id: string) => void;
   setStartedAt: (ts: number) => void;
   setSttError: (err: string | null) => void;
+  setLivePartial: (text: string | null) => void;
   applyServerMessage: (msg: ServerWsMessage) => void;
   markHintActed: (id: string) => void;
   togglePinned: (id: string) => void;
   addNote: (n: RepNote) => void;
+  setNotes: (notes: RepNote[]) => void;
+  updateNote: (index: number, text: string) => void;
+  deleteNote: (index: number) => void;
 }
 
 export const useLiveMeetingStore = create<LiveMeetingState>()(
@@ -57,14 +74,19 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     latencyMs: null,
     startedAt: null,
     sttError: null,
+    livePartial: null,
     transcript: [],
     hints: [],
     followups: [],
+    followupSets: [],
     sentimentSeries: [],
+    sentimentRep: [],
+    sentimentClient: [],
     sentimentEvents: [],
     actedHintIds: new Set<string>(),
     pinnedHintIds: new Set<string>(),
     notes: [],
+    liveTips: [],
 
     reset: () =>
       set({
@@ -75,14 +97,19 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         latencyMs: null,
         startedAt: null,
         sttError: null,
+        livePartial: null,
         transcript: [],
         hints: [],
         followups: [],
+        followupSets: [],
         sentimentSeries: [],
+        sentimentRep: [],
+        sentimentClient: [],
         sentimentEvents: [],
         actedHintIds: new Set<string>(),
         pinnedHintIds: new Set<string>(),
         notes: [],
+        liveTips: [],
       }),
     setConnection: (connected) => set({ connected }),
     setListening: (listening) => set({ listening }),
@@ -92,6 +119,7 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     setMeetingId: (meetingId) => set({ meetingId }),
     setStartedAt: (startedAt) => set({ startedAt }),
     setSttError: (sttError) => set({ sttError }),
+    setLivePartial: (livePartial) => set({ livePartial }),
 
     applyServerMessage: (msg) =>
       set((s) => {
@@ -108,14 +136,33 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
           }
           case "hint": {
             if (s.hints.some((h) => h.id === msg.hint.id)) return {};
-            return { hints: [...s.hints, msg.hint] };
+            return { hints: [msg.hint, ...s.hints] };
           }
-          case "followups":
-            return { followups: msg.items };
+          case "followups": {
+            const last = s.followupSets[s.followupSets.length - 1];
+            // Skip if items haven't changed — keeps history meaningful.
+            if (last && JSON.stringify(last.items) === JSON.stringify(msg.items)) {
+              return { followups: msg.items };
+            }
+            return {
+              followups: msg.items,
+              followupSets: [...s.followupSets, { items: msg.items, at: Date.now() }].slice(-8),
+            };
+          }
           case "sentiment": {
-            const series = [...s.sentimentSeries, msg.sample];
+            const speaker = msg.sample.speaker ?? "all";
             const events = msg.sample.event ? [...s.sentimentEvents, msg.sample.event] : s.sentimentEvents;
-            return { sentimentSeries: series, sentimentEvents: events };
+            if (speaker === "rep") {
+              return { sentimentRep: [...s.sentimentRep, msg.sample], sentimentEvents: events };
+            }
+            if (speaker === "client") {
+              return { sentimentClient: [...s.sentimentClient, msg.sample], sentimentEvents: events };
+            }
+            return { sentimentSeries: [...s.sentimentSeries, msg.sample], sentimentEvents: events };
+          }
+          case "tip": {
+            if (s.liveTips.some((t) => t.id === msg.tip.id)) return {};
+            return { liveTips: [msg.tip, ...s.liveTips] };
           }
           case "pong":
             return { latencyMs: msg.latencyMs };
@@ -138,5 +185,21 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         return { pinnedHintIds: next };
       }),
     addNote: (n) => set((s) => ({ notes: [...s.notes, n] })),
+    setNotes: (notes) => set({ notes }),
+    updateNote: (index, text) =>
+      set((s) => {
+        if (index < 0 || index >= s.notes.length) return {};
+        const next = [...s.notes];
+        const existing = next[index];
+        if (!existing) return {};
+        next[index] = { t: existing.t, text };
+        return { notes: next };
+      }),
+    deleteNote: (index) =>
+      set((s) => {
+        if (index < 0 || index >= s.notes.length) return {};
+        const next = s.notes.filter((_, i) => i !== index);
+        return { notes: next };
+      }),
   })),
 );

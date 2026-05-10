@@ -3,6 +3,9 @@
     "public": "apps/web/dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
+      { "source": "/meetings/*/live", "destination": "/index.html" },
+      { "source": "/meetings/*/setup", "destination": "/index.html" },
+      { "source": "/meetings/*/summary", "destination": "/index.html" },
       { "source": "/healthz", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "/auth", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "/auth/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
@@ -18,6 +21,8 @@
       { "source": "/team/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "/logs", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "/ws/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
+      { "source": "/tasks", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
+      { "source": "/tasks/**", "run": { "serviceId": "scoach-api", "region": "us-central1" } },
       { "source": "**", "destination": "/index.html" }
     ],
     "headers": [

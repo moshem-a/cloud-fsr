@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import { liveRepo } from "../repos/live.repo.ts";
 import { meetingsRepo } from "../repos/meetings.repo.ts";
-import { pushAudio, stopSession } from "../services/audio-session.service.ts";
+import { pushAudio, pushScreenFrame, stopSession } from "../services/audio-session.service.ts";
 
 /**
  * Live meeting HTTP API. Replaces the WebSocket flow because Firebase Hosting
@@ -25,7 +25,17 @@ export async function registerLiveRoutes(app: FastifyInstance) {
     (_req, body, done) => done(null, body),
   );
 
-  app.post<{ Params: { id: string } }>("/meetings/:id/audio", async (req, reply) => {
+  // JPEG parser for screen frame analysis.
+  app.addContentTypeParser(
+    "image/jpeg",
+    { parseAs: "buffer" },
+    (_req, body, done) => done(null, body),
+  );
+
+  app.post<{
+    Params: { id: string };
+    Querystring: { source?: "mic" | "tab" };
+  }>("/meetings/:id/audio", async (req, reply) => {
     const m = await meetingsRepo.get(req.params.id);
     if (!m || m.ownerUid !== req.user!.uid) {
       return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
@@ -34,7 +44,22 @@ export async function registerLiveRoutes(app: FastifyInstance) {
     // Empty bodies are fine — the worklet occasionally flushes a zero-sample
     // chunk (silence boundary, tab focus change). Don't 400 the loop.
     if (buf && buf.length > 0) {
-      pushAudio(req.params.id, buf);
+      // mic = rep's voice, tab = client/customer audio. Default to "client"
+      // (= old single-stream behaviour, which was always shared-tab audio).
+      const role = req.query.source === "mic" ? "rep" : "client";
+      pushAudio(req.params.id, role, buf);
+    }
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { id: string } }>("/meetings/:id/screen-frame", async (req, reply) => {
+    const m = await meetingsRepo.get(req.params.id);
+    if (!m || m.ownerUid !== req.user!.uid) {
+      return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+    }
+    const buf = req.body as Buffer | undefined;
+    if (buf && buf.length > 0) {
+      void pushScreenFrame(req.params.id, buf);
     }
     return reply.code(204).send();
   });
@@ -76,6 +101,25 @@ export async function registerLiveRoutes(app: FastifyInstance) {
     await meetingsRepo.patch(req.params.id, {
       notes: [...(m.notes ?? []), note],
     });
+    return reply.code(204).send();
+  });
+
+  // Replace the entire notes array — used for inline edit / delete from the
+  // rail's NotesPanel. Cheaper than per-note PATCH and avoids an index race
+  // with the optimistic local state.
+  app.put<{
+    Params: { id: string };
+    Body: { notes: { t: string; text: string }[] };
+  }>("/meetings/:id/notes", async (req, reply) => {
+    const m = await meetingsRepo.get(req.params.id);
+    if (!m || m.ownerUid !== req.user!.uid) {
+      return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+    }
+    const cleaned = (req.body.notes ?? [])
+      .filter((n) => typeof n?.text === "string")
+      .map((n) => ({ t: String(n.t ?? ""), text: n.text.trim() }))
+      .filter((n) => n.text.length > 0);
+    await meetingsRepo.patch(req.params.id, { notes: cleaned });
     return reply.code(204).send();
   });
 }

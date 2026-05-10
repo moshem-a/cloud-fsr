@@ -21,6 +21,7 @@ RUN pnpm install --frozen-lockfile --filter "@scoach/api..."
 
 # App source
 COPY apps/api/src apps/api/src
+COPY apps/api/assets apps/api/assets
 COPY apps/api/tsconfig.json apps/api/tsconfig.json
 
 WORKDIR /repo/apps/api

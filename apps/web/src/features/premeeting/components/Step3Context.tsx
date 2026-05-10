@@ -1,6 +1,6 @@
 import { Badge, Button, Card, Spinner, useToast } from "@scoach/ui";
 import { Doc, Plus, Trash } from "@scoach/ui/icons";
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { preMeetingApi } from "../api.ts";
 import { usePreMeetingStore } from "../store.ts";
@@ -16,10 +16,18 @@ export function Step3Context({ meetingId }: Step3ContextProps) {
   const { contextFiles, setContextFiles, insights, setInsights, analyzing, setAnalyzing } = usePreMeetingStore();
   const fileInput = useRef<HTMLInputElement>(null);
   const toast = useToast();
+  const [dragOver, setDragOver] = useState(false);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const arr = Array.from(files);
+    const arr = Array.from(files).filter((f) => {
+      const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+      return ["pdf", "docx", "txt", "md"].includes(ext);
+    });
+    if (arr.length === 0) {
+      toast.push({ tone: "error", message: "Only PDF, DOCX, TXT, and MD files are supported." });
+      return;
+    }
     const tooBig = arr.find((f) => f.size > MAX_BYTES);
     if (tooBig) {
       toast.push({ tone: "error", message: `${tooBig.name} exceeds 25 MB.` });
@@ -33,6 +41,25 @@ export function Step3Context({ meetingId }: Step3ContextProps) {
       toast.push({ tone: "error", message: (err as Error).message });
     }
   }
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    handleFiles(e.dataTransfer.files);
+  }, [contextFiles, meetingId]);
 
   async function runAnalyze() {
     setAnalyzing(true);
@@ -74,10 +101,19 @@ export function Step3Context({ meetingId }: Step3ContextProps) {
         onChange={(e) => handleFiles(e.target.files)}
       />
 
-      <div className="upload-zone" onClick={() => fileInput.current?.click()} role="button" tabIndex={0}>
+      <div
+        className={`upload-zone${dragOver ? " upload-zone-active" : ""}`}
+        onClick={() => fileInput.current?.click()}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        role="button"
+        tabIndex={0}
+      >
         <Plus size={20} />
         <div>
-          <strong>Click to upload</strong> or drag PDF / DOCX / TXT / MD here
+          <strong>{dragOver ? "Drop files here" : "Click to upload"}</strong>{" "}
+          {dragOver ? "" : "or drag PDF / DOCX / TXT / MD here"}
         </div>
       </div>
 

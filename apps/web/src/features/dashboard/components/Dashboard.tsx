@@ -57,7 +57,7 @@ export function Dashboard() {
   }, []);
 
   const filtered = useMemo(() => {
-    return allHistory.filter((m) => {
+    const items = allHistory.filter((m) => {
       const isShared = !!m.sharedBy;
       if (scope === "mine" && isShared) return false;
       if (scope === "shared" && !isShared) return false;
@@ -68,6 +68,19 @@ export function Dashboard() {
       }
       return true;
     });
+    items.sort((a, b) => {
+      const aScheduled = a.scheduledAt && new Date(a.scheduledAt) > new Date() ? 1 : 0;
+      const bScheduled = b.scheduledAt && new Date(b.scheduledAt) > new Date() ? 1 : 0;
+      const aLive = a.status === "live" ? 1 : 0;
+      const bLive = b.status === "live" ? 1 : 0;
+      const aDraft = a.status === "draft" ? 1 : 0;
+      const bDraft = b.status === "draft" ? 1 : 0;
+      const aPriority = aLive * 3 + aScheduled * 2 + aDraft;
+      const bPriority = bLive * 3 + bScheduled * 2 + bDraft;
+      if (bPriority !== aPriority) return bPriority - aPriority;
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+    return items;
   }, [allHistory, scope, filter, search]);
 
   const myCount = useMemo(() => allHistory.filter((m) => !m.sharedBy).length, [allHistory]);
@@ -88,6 +101,23 @@ export function Dashboard() {
         stage: "Discovery",
       });
       nav({ to: "/meetings/$id/setup", params: { id: m.id } });
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // Dev shortcut: skip the setup wizard and jump straight to the live page
+  // with a default-shaped meeting. Same Firestore record as the normal flow,
+  // so history/summary work the same — just no pre-meeting wizard friction.
+  async function quickLive() {
+    setCreating(true);
+    try {
+      const m = await dashboardApi.createMeeting({
+        account: { name: "Test meeting" },
+        title: "Quick test",
+        stage: "Discovery",
+      });
+      nav({ to: "/meetings/$id/live", params: { id: m.id } });
     } finally {
       setCreating(false);
     }
@@ -124,8 +154,14 @@ export function Dashboard() {
               <button type="button" className="pill-btn primary lg" onClick={startNew} disabled={creating}>
                 ▶ Start new meeting
               </button>
-              <button type="button" className="pill-btn lg" onClick={() => openMeeting("m-aviv-3")}>
-                📓 Resume Aviv brief
+              <button
+                type="button"
+                className="pill-btn lg"
+                onClick={quickLive}
+                disabled={creating}
+                title="Skip the setup wizard — go straight to the live page with a default test meeting"
+              >
+                ⚡ Quick live (skip setup)
               </button>
             </div>
           </div>
@@ -170,12 +206,12 @@ export function Dashboard() {
 
           <div className="hist-table">
             <div className="hist-row hist-head-row">
+              <div>Date</div>
               <div>Client</div>
               <div>Meeting</div>
               <div>Stage</div>
               <div>Tags</div>
               <div>Hints</div>
-              <div>Score</div>
               <div></div>
             </div>
             {filtered.map((m) => {
@@ -187,6 +223,10 @@ export function Dashboard() {
                   className="hist-row"
                   onClick={() => openMeeting(m.id, m.status)}
                 >
+                  <div className="hist-date-col">
+                    <div className="hist-date mono">{date}</div>
+                    <div className="hist-time mono">{time} · {m.duration}</div>
+                  </div>
                   <div className="hist-client">
                     <div className="hist-avatar" style={{ background: m.avatar }}>
                       {m.client[0]}
@@ -200,12 +240,11 @@ export function Dashboard() {
                           </span>
                         )}
                       </div>
-                      <div className="hist-date mono">{date} · {time} · {m.duration}</div>
                     </div>
                   </div>
                   <div className="hist-title">
                     {m.title}
-                    {m.status && m.status !== "ended" && m.status !== "summarized" && (
+                    {m.status === "live" && (
                       <span
                         style={{
                           marginLeft: 8,
@@ -214,11 +253,43 @@ export function Dashboard() {
                           fontSize: 11,
                           fontWeight: 600,
                           textTransform: "uppercase",
-                          background: m.status === "live" ? "var(--gc-green-50, #e6f4ea)" : "var(--gc-yellow-50, #fff7e0)",
-                          color: m.status === "live" ? "var(--gc-green, #1e8e3e)" : "var(--gc-yellow, #b06000)",
+                          background: "var(--gc-green-50, #e6f4ea)",
+                          color: "var(--gc-green, #1e8e3e)",
                         }}
                       >
-                        {m.status === "live" ? "● Live · resume" : "Draft"}
+                        ● Live · resume
+                      </span>
+                    )}
+                    {m.scheduledAt && new Date(m.scheduledAt) > new Date() && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          background: "var(--gc-blue-50, #e8f0fe)",
+                          color: "var(--gc-blue, #1a73e8)",
+                        }}
+                      >
+                        Scheduled · {new Date(m.scheduledAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })} {new Date(m.scheduledAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                      </span>
+                    )}
+                    {m.status === "draft" && !(m.scheduledAt && new Date(m.scheduledAt) > new Date()) && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          background: "var(--gc-yellow-50, #fff7e0)",
+                          color: "var(--gc-yellow, #b06000)",
+                        }}
+                      >
+                        Draft
                       </span>
                     )}
                     {m.nextStep && (
@@ -239,9 +310,6 @@ export function Dashboard() {
                   <div className="hist-hints mono">
                     <span style={{ color: "var(--text-1)", fontWeight: 600 }}>{m.actedOn}</span>
                     <span style={{ color: "var(--text-4)" }}>/{m.hintCount}</span>
-                  </div>
-                  <div>
-                    <ScoreCircle score={m.score} />
                   </div>
                   <div className="hist-cta" onClick={(e) => e.stopPropagation()}>
                     <HistShareBtn meeting={m} team={team} />
@@ -344,25 +412,3 @@ export function Dashboard() {
   );
 }
 
-function ScoreCircle({ score }: { score: number }) {
-  const stroke = score >= 85 ? "var(--gc-green)" : score >= 70 ? "var(--gc-blue)" : "var(--gc-yellow)";
-  return (
-    <div className="score-circle">
-      <svg viewBox="0 0 36 36" width={32} height={32}>
-        <circle cx={18} cy={18} r={14} fill="none" stroke="var(--surface-3)" strokeWidth={3} />
-        <circle
-          cx={18}
-          cy={18}
-          r={14}
-          fill="none"
-          stroke={stroke}
-          strokeWidth={3}
-          strokeDasharray={`${score * 0.88} 100`}
-          strokeLinecap="round"
-          transform="rotate(-90 18 18)"
-        />
-      </svg>
-      <span className="mono">{score}</span>
-    </div>
-  );
-}

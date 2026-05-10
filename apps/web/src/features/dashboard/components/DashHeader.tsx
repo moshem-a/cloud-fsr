@@ -51,21 +51,20 @@ export function DashHeader({ onStartNew }: DashHeaderProps) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <div className="brand">
-          <img src="/supercloud-mark.svg" alt="" width={28} height={28} />
+        <Link to="/dashboard" className="brand brand-link">
+          <img src="/supercloud-mark.svg" alt="Sally" width={28} height={28} />
           <div className="brand-text">
-            <div className="brand-name">SuperCloud</div>
+            <div className="brand-name">Sally</div>
             <div className="brand-sub">
-              Sales Coach <span className="brand-tag">Internal</span>
+              Your AI assistant <span className="brand-tag">Internal</span>
             </div>
           </div>
-        </div>
+        </Link>
         <nav className="dash-nav">
           <Link to="/dashboard" activeProps={{ className: "active" }}>Dashboard</Link>
-          <a>Meetings</a>
-          <a>Clients</a>
-          <a>Team</a>
-          <a>Library</a>
+          <Link to="/tasks" search={{ client: "" }} activeProps={{ className: "active" }}>Tasks</Link>
+          <Link to="/dashboard">Meetings</Link>
+          <Link to="/clients" activeProps={{ className: "active" }}>Clients</Link>
         </nav>
       </div>
       <div className="topbar-center" />

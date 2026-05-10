@@ -83,7 +83,13 @@ export function useAudioCapture(opts: UseAudioCaptureOptions): AudioCaptureHandl
 
   const start = useCallback(async () => {
     setError(null);
-    if (capturing) return;
+    // Tear down any existing capture first so the user can switch source
+    // (e.g. pick a different Chrome tab from the picker). Without this,
+    // clicking Switch re-enters start() with capturing=true and bails out
+    // before getDisplayMedia gets a chance to re-prompt.
+    if (capturing) {
+      stop();
+    }
     try {
       const media = await navigator.mediaDevices.getDisplayMedia({
         video: true,

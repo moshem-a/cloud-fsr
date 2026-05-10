@@ -17,6 +17,7 @@ export function TranscriptPanel({ meetingId }: TranscriptPanelProps) {
   const muted = useLiveMeetingStore((s) => s.muted);
   const listening = useLiveMeetingStore((s) => s.listening);
   const sttError = useLiveMeetingStore((s) => s.sttError);
+  const livePartial = useLiveMeetingStore((s) => s.livePartial);
 
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -92,6 +93,25 @@ export function TranscriptPanel({ meetingId }: TranscriptPanelProps) {
         {visible.map((l) => (
           <TranscriptLine key={l.id} line={l} lang={lang} />
         ))}
+
+        {livePartial && (
+          <div
+            style={{
+              padding: "8px 14px",
+              margin: "4px 12px 8px",
+              borderLeft: "2px dashed var(--text-4)",
+              color: "var(--text-3)",
+              fontStyle: "italic",
+              fontSize: 14,
+              lineHeight: 1.45,
+              opacity: 0.85,
+            }}
+            title="Live partial transcript — being revised in real time"
+          >
+            {livePartial}
+            <span className="dot dot-pulse" style={{ marginLeft: 6, background: "var(--text-4)" }} />
+          </div>
+        )}
 
         {muted ? (
           <div className="t-muted-row">

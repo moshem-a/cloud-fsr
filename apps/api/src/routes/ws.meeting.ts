@@ -119,12 +119,14 @@ export async function registerWsMeeting(app: FastifyInstance) {
         started = true;
         scheduleStartedAt = Date.now();
 
-        stt = openSttSession(id, {
-          onPartial: (line) => send({ type: "transcript-partial", line }),
-          onFinal: (line) => {
+        // Legacy WS path — single-stream tab audio, labeled "client". The
+        // production flow uses HTTP + Firestore (audio-session.service.ts).
+        stt = openSttSession(id, "client", {
+          onPartial: (line: TranscriptLine) => send({ type: "transcript-partial", line }),
+          onFinal: (line: TranscriptLine) => {
             void handleFinalLine(line);
           },
-          onError: (err) => {
+          onError: (err: Error) => {
             app.log.error({ err }, "STT error");
             send({ type: "error", code: "stt-error", message: err.message, recoverable: true });
           },

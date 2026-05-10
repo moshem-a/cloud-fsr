@@ -27,6 +27,11 @@ export const preMeetingApi = {
 
   pollAnalyze: (id: string) => api<ContextAnalysisResult>(`/meetings/${id}/context/analysis`),
 
+  fetchTips: (id: string) => api<{ tips: string[] }>(`/meetings/${id}/tips`),
+
+  scheduleMeeting: (id: string, scheduledAt: string) =>
+    api<Meeting>(`/meetings/${id}`, { method: "PATCH", body: { scheduledAt } }),
+
   fetchPriorMeetings: (accountName: string) =>
     api<PriorMeetingsResponse>(`/accounts/${encodeURIComponent(accountName)}/prior-meetings`),
 };

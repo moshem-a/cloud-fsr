@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 
@@ -11,6 +12,7 @@ import { registerContextRoutes } from "./routes/context.routes.ts";
 import { registerLiveRoutes } from "./routes/live.routes.ts";
 import { registerMeetingsRoutes } from "./routes/meetings.routes.ts";
 import { registerSummaryRoutes } from "./routes/summary.routes.ts";
+import { registerTasksRoutes } from "./routes/tasks.routes.ts";
 import { registerUsersRoutes } from "./routes/users.routes.ts";
 import { registerWsMeeting } from "./routes/ws.meeting.ts";
 
@@ -31,6 +33,7 @@ export async function buildServer() {
     origin: config.CORS_ORIGIN.split(","),
     credentials: true,
   });
+  await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024 } });
   await app.register(websocket);
 
   await registerLogging(app);
@@ -43,6 +46,7 @@ export async function buildServer() {
   await registerContextRoutes(app);
   await registerLiveRoutes(app);
   await registerSummaryRoutes(app);
+  await registerTasksRoutes(app);
   await registerWsMeeting(app);
 
   app.decorate("config", config);

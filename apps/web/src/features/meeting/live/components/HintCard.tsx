@@ -36,7 +36,10 @@ export function HintCard({ hint, meetingId, style }: HintCardProps) {
   }
 
   return (
-    <article className={`hint-card hint-in ${acted ? "is-acted" : ""}`} style={style}>
+    <article
+      className={`hint-card hint-in ${acted ? "is-acted" : ""} ${hint.priority === "high" ? "hint-priority-high" : ""}`}
+      style={style}
+    >
       <div className="hint-rail" style={{ background: c.strong }} />
       <div className="hint-body">
         <header className="hint-head">
@@ -63,7 +66,34 @@ export function HintCard({ hint, meetingId, style }: HintCardProps) {
         <h3 className="hint-title">{hint.title}</h3>
         <p className="hint-summary">{hint.summary}</p>
 
-        {open && (
+        {hint.comparisonTable && (
+          <>
+            <div className="hint-compare-topic">{hint.comparisonTable.topic}</div>
+            <div className="hint-compare">
+              <div className={`hint-compare-side is-${hint.comparisonTable.left.verdict ?? "neutral"}`}>
+                <h4>{hint.comparisonTable.left.name}</h4>
+                <ul>
+                  {hint.comparisonTable.left.points.map((p, i) => (
+                    <li key={`l-${i}`}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className={`hint-compare-side is-${hint.comparisonTable.right.verdict ?? "neutral"}`}>
+                <h4>{hint.comparisonTable.right.name}</h4>
+                <ul>
+                  {hint.comparisonTable.right.points.map((p, i) => (
+                    <li key={`r-${i}`}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            {hint.comparisonTable.recommendation && (
+              <div className="hint-compare-rec">{hint.comparisonTable.recommendation}</div>
+            )}
+          </>
+        )}
+
+        {open && hint.proofPoints.length > 0 && (
           <ul className="hint-points">
             {hint.proofPoints.map((p, i) => (
               <li key={`${i}-${p.slice(0, 8)}`}>

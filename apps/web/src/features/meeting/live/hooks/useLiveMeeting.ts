@@ -26,6 +26,7 @@ export function useLiveMeeting(meetingId: string): void {
   const setMeetingId = useLiveMeetingStore((s) => s.setMeetingId);
   const setStartedAt = useLiveMeetingStore((s) => s.setStartedAt);
   const setSttError = useLiveMeetingStore((s) => s.setSttError);
+  const setLivePartial = useLiveMeetingStore((s) => s.setLivePartial);
   const apply = useLiveMeetingStore((s) => s.applyServerMessage);
   const reset = useLiveMeetingStore((s) => s.reset);
 
@@ -96,6 +97,42 @@ export function useLiveMeeting(meetingId: string): void {
       );
       unsubs.push(unsubFollowups);
 
+      const addNote = useLiveMeetingStore.getState().addNote;
+
+      const unsubAutoNotes = onSnapshot(
+        query(collection(meetingRef, "autoNotes"), orderBy("_at", "asc")),
+        (snap) => {
+          for (const change of snap.docChanges()) {
+            if (change.type !== "added") continue;
+            const data = change.doc.data() as { t: string; text: string; source?: string } & DocumentData;
+            const current = useLiveMeetingStore.getState().notes;
+            const exists = current.some((n) => n.text === data.text && n.t === data.t);
+            if (!exists) {
+              addNote({ t: data.t, text: data.text, source: "auto" });
+            }
+          }
+        },
+        (err) => {
+          console.warn("[live] autoNotes listener error", err);
+        },
+      );
+      unsubs.push(unsubAutoNotes);
+
+      const unsubTips = onSnapshot(
+        query(collection(meetingRef, "tips"), orderBy("_at", "desc")),
+        (snap) => {
+          for (const change of snap.docChanges()) {
+            if (change.type === "removed") continue;
+            const tip = change.doc.data() as { id: string; text: string; at: number } & DocumentData;
+            apply({ type: "tip", tip });
+          }
+        },
+        (err) => {
+          console.warn("[live] tips listener error", err);
+        },
+      );
+      unsubs.push(unsubTips);
+
       const unsubLive = onSnapshot(
         doc(meetingRef, "live", "state"),
         (snap) => {
@@ -107,6 +144,19 @@ export function useLiveMeeting(meetingId: string): void {
         },
       );
       unsubs.push(unsubLive);
+
+      const unsubPartial = onSnapshot(
+        doc(meetingRef, "live", "partial"),
+        (snap) => {
+          const data = snap.data() as { text?: string } | undefined;
+          const text = (data?.text ?? "").trim();
+          setLivePartial(text || null);
+        },
+        (err) => {
+          console.warn("[live] partial listener error", err);
+        },
+      );
+      unsubs.push(unsubPartial);
     } catch (err) {
       console.warn("[live] failed to attach Firestore listeners", err);
       setConnection(false);
@@ -118,5 +168,5 @@ export function useLiveMeeting(meetingId: string): void {
       setConnection(false);
       reset();
     };
-  }, [meetingId, apply, reset, setConnection, setMeetingId, setStartedAt, setSttError]);
+  }, [meetingId, apply, reset, setConnection, setMeetingId, setStartedAt, setSttError, setLivePartial]);
 }

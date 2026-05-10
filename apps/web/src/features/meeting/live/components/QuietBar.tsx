@@ -1,10 +1,10 @@
 import type { RepNote } from "@scoach/types";
-import { Close, Notebook, Question, Send } from "@scoach/ui/icons";
+import { Bolt, Close, Notebook, Question, Send } from "@scoach/ui/icons";
 import { useState } from "react";
 
 import { api } from "../../../../lib/http.ts";
 import { useAuthStore } from "../../../auth/store.ts";
-import { quietAsk } from "../gemini/quietAsk.ts";
+import { quietAsk, urgentHelp } from "../gemini/quietAsk.ts";
 import { useLiveMeetingStore } from "../store.ts";
 
 export interface QuietBarProps {
@@ -19,6 +19,7 @@ interface QuietAnswer {
 
 export function QuietBar({ meetingId }: QuietBarProps) {
   const notes = useLiveMeetingStore((s) => s.notes);
+  const transcript = useLiveMeetingStore((s) => s.transcript);
   const addNote = useLiveMeetingStore((s) => s.addNote);
   const startedAt = useLiveMeetingStore((s) => s.startedAt);
 
@@ -26,6 +27,7 @@ export function QuietBar({ meetingId }: QuietBarProps) {
   const [val, setVal] = useState("");
   const [answer, setAnswer] = useState<QuietAnswer | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [urgent, setUrgent] = useState(false);
 
   function elapsed(): string {
     if (!startedAt) return "00:00";
@@ -76,6 +78,32 @@ export function QuietBar({ meetingId }: QuietBarProps) {
     }
   }
 
+  async function urgentAnswer() {
+    setUrgent(true);
+    setAnswer(null);
+    const hasKey = !!useAuthStore.getState().geminiKey;
+    try {
+      if (!hasKey) {
+        setAnswer({
+          q: "(no Gemini API key configured)",
+          a: "Add a personal Gemini API key in Settings → Gemini API to use Urgent help.",
+          chips: ["Settings"],
+        });
+        return;
+      }
+      const a = await urgentHelp(transcript);
+      setAnswer(a);
+    } catch (err) {
+      setAnswer({
+        q: "(urgent help)",
+        a: `Urgent help failed: ${(err as Error).message}`,
+        chips: [],
+      });
+    } finally {
+      setUrgent(false);
+    }
+  }
+
   return (
     <div className="quiet-bar">
       <div className="seg seg-sm quiet-seg">
@@ -119,15 +147,24 @@ export function QuietBar({ meetingId }: QuietBarProps) {
         <button type="button" className="pill-btn primary sm" onClick={submit}>
           <Send size={14} /> {mode === "ask" ? "Ask" : "Save"}
         </button>
+        <button
+          type="button"
+          className="pill-btn urgent sm"
+          onClick={() => void urgentAnswer()}
+          disabled={urgent || transcript.length === 0}
+          title="Generate a fast answer to the client's most recent question using the live transcript"
+        >
+          <Bolt size={14} /> {urgent ? "Thinking…" : "Urgent help"}
+        </button>
       </div>
 
-      {thinking && (
+      {(thinking || urgent) && (
         <div className="quiet-answer thinking">
           <div className="shimmer-line shimmer" style={{ width: "75%" }} />
           <div className="shimmer-line shimmer" style={{ width: "55%" }} />
         </div>
       )}
-      {answer && !thinking && (
+      {answer && !thinking && !urgent && (
         <div className="quiet-answer">
           <div className="qa-q">
             <Question size={14} /> {answer.q}

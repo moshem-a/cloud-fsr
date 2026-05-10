@@ -102,6 +102,11 @@ export interface ServerClosed {
   reason: string;
 }
 
+export interface ServerTip {
+  type: "tip";
+  tip: { id: string; text: string; at: number };
+}
+
 export type ServerWsMessage =
   | ServerReady
   | ServerTranscriptPartial
@@ -111,6 +116,7 @@ export type ServerWsMessage =
   | ServerSentiment
   | ServerError
   | ServerPong
-  | ServerClosed;
+  | ServerClosed
+  | ServerTip;
 
 export type WsMessage = ClientWsMessage | ServerWsMessage;

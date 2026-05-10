@@ -7,7 +7,7 @@ export const SUMMARY: MeetingSummary = {
     title: "Vertex AI Migration · Technical deep-dive",
     date: "2026-04-24T14:00:00Z",
     duration: "47 minutes",
-    participants: ["Yael Ben-David (VP Eng)", "Daniel Cohen (Staff ML)", "Noa Levi (SuperCloud)"],
+    participants: ["Yael Ben-David (VP Eng)", "Daniel Cohen (Staff ML)", "Noa Levi (Sally workspace)"],
   },
   internal: {
     confidence: 0.78,
@@ -58,7 +58,7 @@ export const SUMMARY: MeetingSummary = {
       "**Next steps**\n• I will send a latency benchmark comparing europe-west4 to your current us-east-1 setup by Apr 28.\n• Maya from our team will prepare a pricing comparison for Model Garden vs. your current Bedrock spend by May 2.\n• You agreed to share your current AWS commitment terms so we can plan the migration window appropriately.\n• We will schedule a technical architecture review with Lior, our solutions architect, for the week of May 5.",
       "Looking forward to continuing the conversation. Please don't hesitate to reach out with any questions in the meantime.",
     ],
-    signoff: "Best,\nNoa Levi\nSr. Cloud SE — SuperCloud",
+    signoff: "Best,\nNoa Levi\nSr. Cloud SE",
     tone: "warm",
   },
   references: [

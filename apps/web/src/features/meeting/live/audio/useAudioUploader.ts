@@ -17,8 +17,14 @@ const BASE =
  */
 export interface UseAudioUploaderOpts {
   meetingId: string;
-  /** How often to flush the buffer to the server. Default 1000 ms. */
+  /** How often to flush the buffer to the server. Default 800 ms — keeps each
+   * chunk under Chirp's 25,600-byte (= 800 ms of 16 kHz mono 16-bit PCM)
+   * per-write cap so the server doesn't have to fragment the audio stream
+   * (which interferes with VAD and can drop words at chunk boundaries). */
   flushMs?: number;
+  /** Audio source — sent as ?source= query so the server can route to the
+   * correct STT stream (mic → labeled "You", tab → labeled "Client"). */
+  source?: "mic" | "tab";
 }
 
 export interface AudioUploader {
@@ -29,7 +35,7 @@ export interface AudioUploader {
 }
 
 export function useAudioUploader(opts: UseAudioUploaderOpts): AudioUploader {
-  const { meetingId, flushMs = 1000 } = opts;
+  const { meetingId, flushMs = 800, source = "tab" } = opts;
   const bufferRef = useRef<Int16Array[]>([]);
   const inFlightRef = useRef<Promise<unknown> | null>(null);
   const meetingIdRef = useRef(meetingId);
@@ -76,7 +82,7 @@ export function useAudioUploader(opts: UseAudioUploaderOpts): AudioUploader {
     if (token) headers.Authorization = `Bearer ${token}`;
     else if (import.meta.env.DEV) headers.Authorization = "Bearer dev-token";
 
-    const send = fetch(`${BASE}/meetings/${meetingIdRef.current}/audio`, {
+    const send = fetch(`${BASE}/meetings/${meetingIdRef.current}/audio?source=${source}`, {
       method: "POST",
       headers,
       body: blob,

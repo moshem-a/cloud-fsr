@@ -6,8 +6,6 @@ import { useState } from "react";
 import { authApi } from "../api.ts";
 import { useAuthStore } from "../store.ts";
 
-const KEY_RX = /^AIza[\w-]{20,}$/;
-
 export function ApiKeySetup() {
   const setKey = useAuthStore((s) => s.setGeminiKey);
   const stored = useAuthStore((s) => s.geminiKey);
@@ -22,8 +20,8 @@ export function ApiKeySetup() {
 
   async function handleVerify() {
     setError(null);
-    if (!KEY_RX.test(key)) {
-      setError('Key format invalid (expected "AIza…")');
+    if (!key.trim()) {
+      setError("Please enter your API key.");
       return;
     }
     setBusy(true);
@@ -67,7 +65,7 @@ export function ApiKeySetup() {
       <h1 className="auth-headline">Connect your Gemini API key</h1>
       <p className="auth-sub">
         We use your personal Gemini key only for the Quiet Ask feature (private questions during a call).
-        Live hints, summaries, and analysis run server-side via Vertex AI on the SuperCloud account.
+        Live hints, summaries, and analysis run server-side via Vertex AI on Sally's backend.
       </p>
 
       <Field label="Gemini API key" hint="Get one from aistudio.google.com/apikey.">
@@ -80,7 +78,7 @@ export function ApiKeySetup() {
               setKeyLocal(e.target.value);
               setVerified(false);
             }}
-            placeholder="AIzaSy…"
+            placeholder="Enter your API key…"
             spellCheck={false}
           />
           <button
@@ -102,7 +100,7 @@ export function ApiKeySetup() {
         </Button>
         {/* Save is allowed even without server-side verify, since the api may be unreachable.
             Client-side regex check is enough to prevent obviously-broken keys. */}
-        <Button variant="primary" onClick={handleSave} disabled={!key || !KEY_RX.test(key)}>
+        <Button variant="primary" onClick={handleSave} disabled={!key.trim()}>
           Save & continue
         </Button>
       </div>

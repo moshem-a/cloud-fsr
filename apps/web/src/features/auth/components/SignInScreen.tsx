@@ -94,8 +94,8 @@ export function SignInScreen({ onSignedIn }: SignInScreenProps) {
             <span className="dot d4" />
           </div>
           <div>
-            <div className="auth-brand-name">GCP Sales Coach</div>
-            <div className="auth-brand-sub mono">Internal · Cloud Sales Engineering</div>
+            <div className="auth-brand-name">Sally</div>
+            <div className="auth-brand-sub mono">Your AI assistant · Cloud Sales Engineering</div>
           </div>
         </div>
 

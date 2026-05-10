@@ -1,4 +1,5 @@
 import type {
+  ActionItem,
   ClientEmail,
   ContextFile,
   ContextInsight,
@@ -110,6 +111,11 @@ export interface RegenerateEmailRequest {
   tone: "formal" | "warm" | "brief";
 }
 export type RegenerateEmailResponse = ClientEmail;
+export interface UpdateEmailRequest {
+  bodyText: string;
+  subject?: string;
+}
+export type UpdateEmailResponse = ClientEmail;
 export interface SendEmailRequest {
   to: string[];
   cc?: string[];
@@ -119,6 +125,32 @@ export interface SendEmailRequest {
 export interface SendEmailResponse {
   messageId: string;
 }
+
+// ---------- Action Items ----------
+export interface UpdateActionItemsRequest {
+  actionItems: ActionItem[];
+}
+export type UpdateActionItemsResponse = ActionItem[];
+
+// ---------- Tasks ----------
+export interface TaskView {
+  taskId: string;
+  meetingId: string;
+  client: string;
+  meetingTitle: string;
+  meetingDate: string;
+  who: string;
+  what: string;
+  due: string;
+  done: boolean;
+}
+export interface ListTasksResponse {
+  items: TaskView[];
+}
+export interface UpdateTaskRequest {
+  done: boolean;
+}
+export type UpdateTaskResponse = TaskView;
 
 // ---------- Sharing ----------
 export interface ShareRecipient {

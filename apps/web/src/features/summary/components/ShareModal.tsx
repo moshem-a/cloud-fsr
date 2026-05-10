@@ -354,7 +354,7 @@ export function ShareModal({ summary, onClose }: ShareModalProps) {
               onClick={() => setLink((l) => !l)}
             >
               <span className={`toggle-dot ${link ? "on" : ""}`} />
-              <span>Anyone at SuperCloud with the link</span>
+              <span>Anyone in the workspace with the link</span>
             </button>
             {link && (
               <div className="share-link-box">

@@ -1,4 +1,5 @@
 import { Alert, Trend } from "@scoach/ui/icons";
+import { useMemo } from "react";
 
 import { useLiveMeetingStore } from "../store.ts";
 
@@ -22,9 +23,13 @@ function colorFor(kind: "positive" | "buying" | "concern" | "neutral"): string {
 }
 
 export function SentimentView() {
-  const series = useLiveMeetingStore((s) => s.sentimentSeries.map((sample) => sample.value));
+  // Don't `.map(...)` inside the selector — returns a new array each render,
+  // breaks Zustand's reference equality, infinite loop (React #185). Derive
+  // in useMemo instead.
+  const sentimentSeries = useLiveMeetingStore((s) => s.sentimentSeries);
   const events = useLiveMeetingStore((s) => s.sentimentEvents);
   const startedAt = useLiveMeetingStore((s) => s.startedAt);
+  const series = useMemo(() => sentimentSeries.map((sample) => sample.value), [sentimentSeries]);
 
   if (series.length === 0) {
     return (
@@ -44,6 +49,8 @@ export function SentimentView() {
 
   const opening = series[0] ?? last;
   const delta = last - opening;
+  const avg = Math.round(series.reduce((a, b) => a + b, 0) / series.length);
+  const lastEvent = events.length > 0 ? events[events.length - 1] : null;
   const elapsed = startedAt
     ? `${Math.floor((Date.now() - startedAt) / 60000)
         .toString()
@@ -55,7 +62,7 @@ export function SentimentView() {
       <div className="sent-row">
         <div className="sent-stat">
           <div className="sent-stat-label">Engagement</div>
-          <div className="sent-stat-val" style={{ color: "var(--gc-green)" }}>
+          <div className="sent-stat-val" style={{ color: last >= 60 ? "var(--gc-green)" : last >= 35 ? "var(--gc-yellow)" : "var(--gc-red, #b00020)" }}>
             {last}
             <span>/100</span>
           </div>
@@ -65,16 +72,18 @@ export function SentimentView() {
           </div>
         </div>
         <div className="sent-stat">
-          <div className="sent-stat-label">Tone</div>
-          <div className="sent-stat-val">Confident</div>
-          <div className="sent-stat-trend">Pace +12% · steady</div>
+          <div className="sent-stat-label">Last signal</div>
+          <div className="sent-stat-val">
+            {lastEvent ? (lastEvent.kind ?? "neutral").charAt(0).toUpperCase() + (lastEvent.kind ?? "neutral").slice(1) : "Neutral"}
+          </div>
+          {lastEvent && (
+            <div className="sent-stat-trend">{lastEvent.label}</div>
+          )}
         </div>
         <div className="sent-stat">
-          <div className="sent-stat-label">Hesitation</div>
-          <div className="sent-stat-val" style={{ color: "var(--gc-yellow)" }}>
-            Low
-          </div>
-          <div className="sent-stat-trend">2 fillers · last @ 01:18</div>
+          <div className="sent-stat-label">Samples</div>
+          <div className="sent-stat-val">{series.length}</div>
+          <div className="sent-stat-trend">Average: {avg}/100</div>
         </div>
       </div>
 
@@ -116,20 +125,17 @@ export function SentimentView() {
         </ul>
       </div>
 
-      {events.some((e) => e.kind === "buying") && (
-        <div className="sent-flag">
+      {events.filter((e) => e.kind === "buying").map((e, i) => (
+        <div key={`buying-${i}`} className="sent-flag">
           <div className="sent-flag-icon" style={{ background: "var(--gc-green-50)", color: "var(--gc-green)" }}>
             <Alert size={14} />
           </div>
           <div>
             <div className="sent-flag-title">Buying signal detected</div>
-            <div className="sent-flag-sub">
-              "…it has to happen this quarter. The board is pushing." — confidence elevated, urgency present.
-              Consider asking about decision-makers and procurement timeline.
-            </div>
+            <div className="sent-flag-sub">{e.label}</div>
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }
