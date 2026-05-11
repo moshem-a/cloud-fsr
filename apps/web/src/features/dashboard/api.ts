@@ -35,4 +35,7 @@ export const dashboardApi = {
 
   fetchInsights: () =>
     api<CoachInsightsResponse>("/users/me/insights").then((r) => r.items).catch(() => [] as CoachInsight[]),
+
+  deleteMeeting: (id: string) =>
+    api<{ ok: boolean }>(`/meetings/${id}`, { method: "DELETE" }),
 };

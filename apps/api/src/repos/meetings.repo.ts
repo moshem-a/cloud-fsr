@@ -40,6 +40,14 @@ export const meetingsRepo = {
     return next;
   },
 
+  async remove(id: string): Promise<void> {
+    if (isFirestoreEnabled()) {
+      await getDb().collection(COLLECTION).doc(id).delete();
+      return;
+    }
+    memory.delete(id);
+  },
+
   async listForOwner(uid: string): Promise<Meeting[]> {
     if (isFirestoreEnabled()) {
       const snap = await getDb()

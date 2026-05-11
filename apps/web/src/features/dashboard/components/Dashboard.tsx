@@ -1,5 +1,5 @@
 import type { CoachInsight, HistoryItem, TaskView, TeamMember, UserStatsResponse } from "@scoach/types";
-import { Chev, Inbox, Search, Spark, User as UserIcon } from "@scoach/ui/icons";
+import { Chev, Inbox, Search, Spark, Trash, User as UserIcon } from "@scoach/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
@@ -161,9 +161,6 @@ export function Dashboard() {
   }
 
   function openMeeting(id: string, status?: string) {
-    // Resume in-progress meetings on the live page; route ended/summarized
-    // meetings to the summary view. Drafts (never started) go to setup so
-    // the user can finish configuring them.
     if (status === "draft") {
       nav({ to: "/meetings/$id/setup", params: { id } });
     } else if (status === "live") {
@@ -171,6 +168,14 @@ export function Dashboard() {
     } else {
       nav({ to: "/meetings/$id/summary", params: { id } });
     }
+  }
+
+  function deleteMeeting(id: string, client: string) {
+    if (!confirm(`Delete meeting with ${client || "this client"}? This cannot be undone.`)) return;
+    setAllHistory((prev) => prev.filter((m) => m.id !== id));
+    void dashboardApi.deleteMeeting(id).catch(() => {
+      dashboardApi.fetchHistory({}).then((r) => setAllHistory(r.items)).catch(() => {});
+    });
   }
 
   return (
@@ -375,6 +380,14 @@ export function Dashboard() {
                     </div>
                     <div className="hist-cta" onClick={(e) => e.stopPropagation()}>
                       <HistShareBtn meeting={m} team={team} />
+                      <button
+                        type="button"
+                        className="hist-delete-btn"
+                        title="Delete meeting"
+                        onClick={() => deleteMeeting(m.id, m.client)}
+                      >
+                        <Trash size={15} />
+                      </button>
                     </div>
                   </button>
                   {isExpanded && meetingTasks.length > 0 && (

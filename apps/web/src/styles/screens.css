@@ -144,7 +144,14 @@
 .stage-negotiation   { background: var(--gc-green-50);  color: var(--gc-green); }
 .stage-intro         { background: var(--surface-3);    color: var(--text-2); }
 
-.hist-cta { color: var(--text-4); }
+.hist-cta { color: var(--text-4); display: flex; align-items: center; gap: 4px; }
+.hist-delete-btn {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px; color: var(--text-4); opacity: 0;
+  transition: opacity .15s, background .15s, color .15s;
+}
+.hist-row:hover .hist-delete-btn { opacity: 1; }
+.hist-delete-btn:hover { background: var(--gc-red-50, #fce8e6); color: var(--gc-red, #d93025); }
 .hist-hints { font-size: 12px; }
 
 /* Upcoming meetings (calendar) */

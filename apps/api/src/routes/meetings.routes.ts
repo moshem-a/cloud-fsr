@@ -89,4 +89,17 @@ export async function registerMeetingsRoutes(app: FastifyInstance) {
       return reply.send(updated);
     },
   );
+
+  app.delete<{ Params: { id: string }; Reply: { ok: boolean } | { code: string; message: string } }>(
+    "/meetings/:id",
+    async (req, reply) => {
+      const existing = await meetingsRepo.get(req.params.id);
+      if (!existing) return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+      if (existing.ownerUid !== req.user!.uid) {
+        return reply.code(403).send({ code: "forbidden", message: "Not your meeting" });
+      }
+      await meetingsRepo.remove(req.params.id);
+      return reply.send({ ok: true });
+    },
+  );
 }

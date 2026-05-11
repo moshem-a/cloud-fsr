@@ -1,14 +1,15 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const STORAGE_KEY = "sally.live.layout.v1";
+const STORAGE_KEY = "sally.live.layout.v2";
 
-// Defaults — transcript dominant per user request, coach smaller, rail compact.
-const DEFAULTS = { rail: 240, coach: 460 } as const;
+const DEFAULTS = { rail: 240, coach: 460, transcript: 400 } as const;
 const MIN = { rail: 200, coach: 320, transcript: 280 } as const;
+const MAX = { rail: 480, coach: 900, transcript: 800 } as const;
 
 interface Widths {
   rail: number;
   coach: number;
+  transcript: number;
 }
 
 interface ResizableMainProps {
@@ -20,14 +21,15 @@ interface ResizableMainProps {
 function loadWidths(): Widths {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { rail: DEFAULTS.rail, coach: DEFAULTS.coach };
+    if (!raw) return { ...DEFAULTS };
     const parsed = JSON.parse(raw) as Partial<Widths>;
     return {
-      rail: Math.max(MIN.rail, Math.min(parsed.rail ?? DEFAULTS.rail, 480)),
-      coach: Math.max(MIN.coach, Math.min(parsed.coach ?? DEFAULTS.coach, 900)),
+      rail: Math.max(MIN.rail, Math.min(parsed.rail ?? DEFAULTS.rail, MAX.rail)),
+      coach: Math.max(MIN.coach, Math.min(parsed.coach ?? DEFAULTS.coach, MAX.coach)),
+      transcript: Math.max(MIN.transcript, Math.min(parsed.transcript ?? DEFAULTS.transcript, MAX.transcript)),
     };
   } catch {
-    return { rail: DEFAULTS.rail, coach: DEFAULTS.coach };
+    return { ...DEFAULTS };
   }
 }
 
@@ -46,9 +48,9 @@ function saveWidths(w: Widths): void {
 export function ResizableMain({ rail, coach, transcript }: ResizableMainProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState<Widths>(() =>
-    typeof window === "undefined" ? { rail: DEFAULTS.rail, coach: DEFAULTS.coach } : loadWidths(),
+    typeof window === "undefined" ? { ...DEFAULTS } : loadWidths(),
   );
-  const dragRef = useRef<{ which: "rail-coach" | "coach-transcript"; startX: number; startRail: number; startCoach: number } | null>(null);
+  const dragRef = useRef<{ which: "rail-coach" | "coach-transcript"; startX: number; startWidths: Widths } | null>(null);
 
   useEffect(() => {
     saveWidths(widths);
@@ -57,11 +59,11 @@ export function ResizableMain({ rail, coach, transcript }: ResizableMainProps) {
   const onMouseDown = useCallback(
     (which: "rail-coach" | "coach-transcript") => (e: React.MouseEvent) => {
       e.preventDefault();
-      dragRef.current = { which, startX: e.clientX, startRail: widths.rail, startCoach: widths.coach };
+      dragRef.current = { which, startX: e.clientX, startWidths: { ...widths } };
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
     },
-    [widths.rail, widths.coach],
+    [widths],
   );
 
   useEffect(() => {
@@ -69,19 +71,13 @@ export function ResizableMain({ rail, coach, transcript }: ResizableMainProps) {
       const drag = dragRef.current;
       if (!drag) return;
       const dx = e.clientX - drag.startX;
-      const containerW = containerRef.current?.clientWidth ?? 1200;
-      const maxTotal = containerW - 28; // gaps + padding
       if (drag.which === "rail-coach") {
-        const nextRail = Math.max(MIN.rail, Math.min(drag.startRail + dx, 480));
-        // Ensure transcript still has min space.
-        const remaining = maxTotal - nextRail - widths.coach;
-        if (remaining < MIN.transcript) return;
+        const nextRail = Math.max(MIN.rail, Math.min(drag.startWidths.rail + dx, MAX.rail));
         setWidths((w) => ({ ...w, rail: nextRail }));
       } else {
-        const nextCoach = Math.max(MIN.coach, Math.min(drag.startCoach + dx, 900));
-        const remaining = maxTotal - widths.rail - nextCoach;
-        if (remaining < MIN.transcript) return;
-        setWidths((w) => ({ ...w, coach: nextCoach }));
+        const nextCoach = Math.max(MIN.coach, Math.min(drag.startWidths.coach + dx, MAX.coach));
+        const nextTranscript = Math.max(MIN.transcript, Math.min(drag.startWidths.transcript - dx, MAX.transcript));
+        setWidths((w) => ({ ...w, coach: nextCoach, transcript: nextTranscript }));
       }
     }
     function onUp() {
@@ -97,13 +93,13 @@ export function ResizableMain({ rail, coach, transcript }: ResizableMainProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [widths.rail, widths.coach]);
+  }, []);
 
   const gridStyle = useMemo<React.CSSProperties>(
     () => ({
-      gridTemplateColumns: `${widths.rail}px 6px minmax(0, 1fr) 6px min(20vw, 360px)`,
+      gridTemplateColumns: `${widths.rail}px 6px minmax(0, 1fr) 6px ${widths.transcript}px`,
     }),
-    [widths.rail, widths.coach],
+    [widths.rail, widths.transcript],
   );
 
   return (
