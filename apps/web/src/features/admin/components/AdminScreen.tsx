@@ -101,8 +101,9 @@ export function AdminScreen() {
 
   if (email !== "moshem@google.com") return null;
 
-  const totalMeetings = users.reduce((s, u) => s + u.meetingCount, 0);
-  const totalTime = users.reduce((s, u) => s + u.totalMinutes, 0);
+  const safeUsers = users ?? [];
+  const totalMeetings = safeUsers.reduce((s, u) => s + u.meetingCount, 0);
+  const totalTime = safeUsers.reduce((s, u) => s + u.totalMinutes, 0);
 
   return (
     <div className="dash">
@@ -117,10 +118,10 @@ export function AdminScreen() {
         </p>
 
         {/* Stats bar */}
-        {!loading && users.length > 0 && (
+        {!loading && safeUsers.length > 0 && (
           <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
             {[
-              { label: "Total users", value: users.length },
+              { label: "Total users", value: safeUsers.length },
               { label: "Total meetings", value: totalMeetings },
               { label: "Total time", value: formatMinutes(totalTime) },
             ].map((s) => (
@@ -155,7 +156,7 @@ export function AdminScreen() {
         }}>
           {loading ? (
             <div style={{ padding: 40, textAlign: "center", color: "var(--text-3)" }}>Loading users…</div>
-          ) : users.length === 0 && !error ? (
+          ) : safeUsers.length === 0 && !error ? (
             <div style={{ padding: 40, textAlign: "center", color: "var(--text-3)" }}>No users found.</div>
           ) : (
             <>
@@ -183,7 +184,7 @@ export function AdminScreen() {
               </div>
 
               {/* Rows */}
-              {users.map((u) => {
+              {safeUsers.map((u) => {
                 const isExpanded = expandedUid === u.uid;
                 return (
                   <div key={u.uid} style={{ borderTop: "1px solid var(--border-soft)" }}>
