@@ -614,6 +614,62 @@ If the image has no useful sales context (blank screen, generic UI), return { "s
   }
 }
 
+// ---------- Google Meet info extraction from screen share ----------
+export async function extractMeetInfo(imageBuffer: Buffer): Promise<{
+  isMeet: boolean;
+  meetingTitle?: string;
+  participants?: string[];
+} | null> {
+  if (!isGeminiEnabled()) return null;
+  try {
+    const model = vertex().getGenerativeModel({
+      model: MODEL_FLASH,
+      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+    });
+    const base64 = imageBuffer.toString("base64");
+    const raw = await streamToText(model, [
+      {
+        role: "user",
+        parts: [
+          { inlineData: { mimeType: "image/jpeg", data: base64 } },
+          {
+            text: `Look at this screenshot. Is this a Google Meet video call interface?
+
+If YES, extract:
+1. The meeting title visible in the Google Meet UI (usually shown at the top or in the meeting details)
+2. The names of participants visible on screen (from name labels on video tiles, the participants panel, or the meeting roster)
+
+Return STRICT JSON only:
+{
+  "isMeet": true,
+  "meetingTitle": "<meeting title if visible, or null>",
+  "participants": ["<name1>", "<name2>", ...]
+}
+
+If this is NOT a Google Meet screen, return: { "isMeet": false }`,
+          },
+        ],
+      },
+    ]);
+    const cleaned = extractJson(raw);
+    const parsed = JSON.parse(cleaned || "{}") as {
+      isMeet?: boolean;
+      meetingTitle?: string;
+      participants?: string[];
+    };
+    return {
+      isMeet: !!parsed.isMeet,
+      meetingTitle: parsed.meetingTitle || undefined,
+      participants: Array.isArray(parsed.participants)
+        ? parsed.participants.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+        : undefined,
+    };
+  } catch (err) {
+    console.warn(`[gemini] extractMeetInfo failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 // ---------- Action-item detection (auto-notes from both speakers) ----------
 const ACTION_ITEM_EN = /\b(I'll|I will|let me|I can|I'm going to|we'll|we will|follow up|send you|set up|schedule|check on|get back to you|look into|prepare|I need to|I should|can you|could you|please\s+(?:send|share|prepare|schedule|check|provide|set up)|we need|we'd like|we expect|as a next step|by next|by end of|before the|don't forget|make sure|need to|let's schedule|let's set up|we agreed)\b/i;
 

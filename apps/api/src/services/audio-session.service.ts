@@ -10,6 +10,7 @@ import {
   classifySentiment,
   detectLang,
   extractActionItem,
+  extractMeetInfo,
   generateFollowups,
   generateHint,
   generateInfographic,
@@ -99,6 +100,8 @@ interface ActiveSession {
   summaryTick: NodeJS.Timeout | null;
   lastSummaryAt: number;
   summaryInFlight: boolean;
+  // Google Meet screen detection
+  meetInfoExtracted: boolean;
 }
 
 const NOOP_STT: SttSession = { pushAudio: () => {}, close: () => {} };
@@ -166,6 +169,7 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     summaryTick: null,
     lastSummaryAt: 0,
     summaryInFlight: false,
+    meetInfoExtracted: false,
   };
 
   // Cache meeting goal once — avoids a Firestore read on every hint/tip/answer cycle.
@@ -372,8 +376,8 @@ export async function handleFinalLine(session: ActiveSession, line: TranscriptLi
     void detectAndWriteActionItem(session, line).catch(() => {});
   }
 
-  // 6. Auto-detect meeting name after ~5 transcript lines
-  if (session.rollingTranscript.length === 5 && isGeminiEnabled()) {
+  // 6. Auto-detect meeting name after ~5 transcript lines (skip if already extracted from Google Meet screen)
+  if (session.rollingTranscript.length === 5 && isGeminiEnabled() && !session.meetInfoExtracted) {
     void (async () => {
       const m = await meetingsRepo.get(session.meetingId).catch(() => null);
       if (m && (!m.title || m.title === "New Meeting" || m.title.startsWith("Meeting with"))) {
@@ -684,6 +688,8 @@ async function runTipsTick(session: ActiveSession): Promise<void> {
 // ---------- Screen frame analysis ----------
 const screenFrameThrottle = new Map<string, number>();
 const SCREEN_FRAME_COOLDOWN_MS = 15_000;
+const meetInfoAttempts = new Map<string, number>();
+const MAX_MEET_INFO_ATTEMPTS = 3;
 
 export async function pushScreenFrame(meetingId: string, imageBuffer: Buffer): Promise<void> {
   if (!isGeminiEnabled()) return;
@@ -692,6 +698,60 @@ export async function pushScreenFrame(meetingId: string, imageBuffer: Buffer): P
   if (now - lastAt < SCREEN_FRAME_COOLDOWN_MS) return;
   screenFrameThrottle.set(meetingId, now);
 
+  const session = sessions.get(meetingId);
+
+  // --- Google Meet info extraction (first few frames only) ---
+  if (session && !session.meetInfoExtracted) {
+    const attempts = meetInfoAttempts.get(meetingId) ?? 0;
+    if (attempts < MAX_MEET_INFO_ATTEMPTS) {
+      meetInfoAttempts.set(meetingId, attempts + 1);
+      try {
+        const meetInfo = await extractMeetInfo(imageBuffer);
+        if (meetInfo?.isMeet) {
+          const patch: Record<string, unknown> = {};
+          if (meetInfo.meetingTitle) {
+            patch.title = meetInfo.meetingTitle;
+          }
+          if (meetInfo.participants && meetInfo.participants.length > 0) {
+            const participants: Participant[] = meetInfo.participants.map((name, i) => {
+              const words = name.split(/\s+/);
+              const initials = words.map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 2);
+              return {
+                name,
+                role: "",
+                side: "client" as const,
+                color: PARTICIPANT_COLORS[i % PARTICIPANT_COLORS.length]!,
+                initials: initials || "?",
+              };
+            });
+            patch.participants = participants;
+            for (const p of meetInfo.participants) {
+              if (!session.seenSpeakers.has(p)) {
+                session.seenSpeakers.set(p, { side: "client" });
+              }
+            }
+          }
+          if (Object.keys(patch).length > 0) {
+            await meetingsRepo.patch(meetingId, patch).catch(() => {});
+            console.log(
+              `[audio-session] meeting=${meetingId} extracted meet info: title="${meetInfo.meetingTitle}" participants=${meetInfo.participants?.length ?? 0}`,
+            );
+          }
+          session.meetInfoExtracted = true;
+        } else if (meetInfo && !meetInfo.isMeet) {
+          session.meetInfoExtracted = true;
+        }
+      } catch (err) {
+        console.warn(
+          `[audio-session] meeting=${meetingId} extractMeetInfo error: ${(err as Error).message}`,
+        );
+      }
+    } else {
+      session.meetInfoExtracted = true;
+    }
+  }
+
+  // --- Screen content analysis (always runs) ---
   const t0 = Date.now();
   try {
     const result = await analyzeScreenFrame(imageBuffer);
@@ -705,7 +765,6 @@ export async function pushScreenFrame(meetingId: string, imageBuffer: Buffer): P
     ];
     if (allFindings.length === 0) return;
 
-    const session = sessions.get(meetingId);
     const hint: Hint = {
       id: randomUUID(),
       title: "Screen insight",

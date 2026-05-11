@@ -1,5 +1,5 @@
 import type { ActionItem, MeetingSummary } from "@scoach/types";
-import { Alert, Check, Chev, Close, Trend } from "@scoach/ui/icons";
+import { Alert, Check, Chev, Close, Trend, Users } from "@scoach/ui/icons";
 import { useState } from "react";
 
 import { summaryApi } from "../api.ts";
@@ -307,6 +307,22 @@ export function InternalSummary({
             </div>
           ))}
         </section>
+
+        {summary.meeting.participants && summary.meeting.participants.length > 0 && (
+          <section className="sum-card">
+            <div className="sum-card-head">
+              <h3 className="sum-h3">
+                <Users size={14} /> Participants
+              </h3>
+              <span className="sum-meta">{summary.meeting.participants.length}</span>
+            </div>
+            <ul className="sum-list">
+              {summary.meeting.participants.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="sum-card">
           <div className="sum-card-head">
