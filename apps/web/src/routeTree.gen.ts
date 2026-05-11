@@ -17,6 +17,7 @@ import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppClientsRouteImport } from './routes/_app.clients'
 import { Route as AppApikeyRouteImport } from './routes/_app.apikey'
+import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppMeetingsIdSummaryRouteImport } from './routes/_app.meetings.$id.summary'
 import { Route as AppMeetingsIdSetupRouteImport } from './routes/_app.meetings.$id.setup'
 import { Route as AppMeetingsIdLiveRouteImport } from './routes/_app.meetings.$id.live'
@@ -60,6 +61,11 @@ const AppApikeyRoute = AppApikeyRouteImport.update({
   path: '/apikey',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMeetingsIdSummaryRoute = AppMeetingsIdSummaryRouteImport.update({
   id: '/meetings/$id/summary',
   path: '/meetings/$id/summary',
@@ -79,6 +85,7 @@ const AppMeetingsIdLiveRoute = AppMeetingsIdLiveRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/signin': typeof SigninRoute
+  '/admin': typeof AppAdminRoute
   '/apikey': typeof AppApikeyRoute
   '/clients': typeof AppClientsRoute
   '/dashboard': typeof AppDashboardRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/signin': typeof SigninRoute
+  '/admin': typeof AppAdminRoute
   '/apikey': typeof AppApikeyRoute
   '/clients': typeof AppClientsRoute
   '/dashboard': typeof AppDashboardRoute
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/signin': typeof SigninRoute
+  '/_app/admin': typeof AppAdminRoute
   '/_app/apikey': typeof AppApikeyRoute
   '/_app/clients': typeof AppClientsRoute
   '/_app/dashboard': typeof AppDashboardRoute
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/signin'
+    | '/admin'
     | '/apikey'
     | '/clients'
     | '/dashboard'
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/signin'
+    | '/admin'
     | '/apikey'
     | '/clients'
     | '/dashboard'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/signin'
+    | '/_app/admin'
     | '/_app/apikey'
     | '/_app/clients'
     | '/_app/dashboard'
@@ -218,6 +230,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppApikeyRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin': {
+      id: '/_app/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/meetings/$id/summary': {
       id: '/_app/meetings/$id/summary'
       path: '/meetings/$id/summary'
@@ -243,6 +262,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRoute
   AppApikeyRoute: typeof AppApikeyRoute
   AppClientsRoute: typeof AppClientsRoute
   AppDashboardRoute: typeof AppDashboardRoute
@@ -254,6 +274,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRoute,
   AppApikeyRoute: AppApikeyRoute,
   AppClientsRoute: AppClientsRoute,
   AppDashboardRoute: AppDashboardRoute,

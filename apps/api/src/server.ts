@@ -15,6 +15,7 @@ import { registerSummaryRoutes } from "./routes/summary.routes.ts";
 import { registerCalendarRoutes } from "./routes/calendar.routes.ts";
 import { registerTasksRoutes } from "./routes/tasks.routes.ts";
 import { registerUsersRoutes } from "./routes/users.routes.ts";
+import { registerAdminRoutes } from "./routes/admin.routes.ts";
 import { registerWsMeeting } from "./routes/ws.meeting.ts";
 
 export async function buildServer() {
@@ -49,6 +50,7 @@ export async function buildServer() {
   await registerSummaryRoutes(app);
   await registerCalendarRoutes(app);
   await registerTasksRoutes(app);
+  await registerAdminRoutes(app);
   await registerWsMeeting(app);
 
   app.decorate("config", config);

@@ -204,6 +204,31 @@ export interface LogBatchRequest {
   events: LogEvent[];
 }
 
+// ---------- Admin ----------
+export interface AdminUser {
+  uid: string;
+  email: string;
+  name?: string;
+  meetingCount: number;
+  simulationCount: number;
+  lastMeetingDate?: string;
+}
+export interface AdminMeetingView {
+  id: string;
+  title: string;
+  client: string;
+  stage: string;
+  status?: string;
+  meetingType?: string;
+  createdAt: string;
+  duration: string;
+  summaryHighlights?: {
+    wentWell?: string[];
+    couldImprove?: string[];
+    actionItemCount?: number;
+  };
+}
+
 // ---------- Generic ----------
 export interface SummaryResponseEnvelope {
   summary: MeetingSummary;

@@ -5,7 +5,7 @@ import { useAuthStore } from "../../../auth/store.ts";
 import { api } from "../../../../lib/http.ts";
 
 const WS_URL =
-  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
 const MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog";
 
 export interface UseGeminiLiveOptions {
