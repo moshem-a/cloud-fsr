@@ -1,7 +1,7 @@
 import type { CoachInsight, HistoryItem, TaskView, TeamMember, UserStatsResponse } from "@scoach/types";
 import { Brain, Chev, Inbox, Search, Spark, Trash, User as UserIcon } from "@scoach/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuthStore } from "../../auth/store.ts";
 import { tasksApi } from "../../tasks/api.ts";
@@ -178,6 +178,81 @@ export function Dashboard() {
     });
   }
 
+  // --- Inline editing for meeting title and client ---
+  const [editingField, setEditingField] = useState<{ id: string; field: "title" | "client" } | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [clientSuggestions, setClientSuggestions] = useState<string[]>([]);
+  const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  const knownClients = useMemo(() => {
+    const names = new Set<string>();
+    for (const m of allHistory) {
+      if (m.client && m.client !== "—") names.add(m.client);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [allHistory]);
+
+  function startEditing(e: React.MouseEvent, id: string, field: "title" | "client", value: string) {
+    e.stopPropagation();
+    e.preventDefault();
+    setEditingField({ id, field });
+    setEditDraft(value);
+    setClientSuggestions([]);
+    setSelectedSuggestion(-1);
+  }
+
+  const commitEdit = useCallback(() => {
+    if (!editingField) return;
+    const text = editDraft.trim();
+    if (!text) { setEditingField(null); return; }
+    const { id, field } = editingField;
+    const original = allHistory.find((m) => m.id === id);
+    if (!original) { setEditingField(null); return; }
+    const oldVal = field === "title" ? original.title : original.client;
+    if (text === oldVal) { setEditingField(null); return; }
+
+    setAllHistory((prev) => prev.map((m) =>
+      m.id === id ? { ...m, [field]: text, ...(field === "client" ? { avatar: original.avatar } : {}) } : m,
+    ));
+    setEditingField(null);
+
+    const patch = field === "title"
+      ? { title: text }
+      : { account: { name: text } };
+    void dashboardApi.patchMeeting(id, patch).catch(() => {
+      setAllHistory((prev) => prev.map((m) =>
+        m.id === id ? { ...m, [field]: oldVal } : m,
+      ));
+    });
+  }, [editingField, editDraft, allHistory]);
+
+  function handleEditKeyDown(e: React.KeyboardEvent) {
+    if (editingField?.field === "client" && clientSuggestions.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setSelectedSuggestion((i) => Math.min(i + 1, clientSuggestions.length - 1)); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setSelectedSuggestion((i) => Math.max(i - 1, -1)); return; }
+      if (e.key === "Enter" && selectedSuggestion >= 0) { e.preventDefault(); setEditDraft(clientSuggestions[selectedSuggestion]!); setClientSuggestions([]); return; }
+    }
+    if (e.key === "Enter") commitEdit();
+    if (e.key === "Escape") setEditingField(null);
+  }
+
+  function handleClientInput(value: string) {
+    setEditDraft(value);
+    setSelectedSuggestion(-1);
+    if (value.trim().length > 0) {
+      const lower = value.toLowerCase();
+      setClientSuggestions(knownClients.filter((c) => c.toLowerCase().includes(lower)));
+    } else {
+      setClientSuggestions([]);
+    }
+  }
+
+  function selectSuggestion(name: string) {
+    setEditDraft(name);
+    setClientSuggestions([]);
+  }
+
   async function startSimulation(parentId: string) {
     try {
       const sim = await dashboardApi.createSimulation(parentId);
@@ -285,19 +360,69 @@ export function Dashboard() {
                       <div className="hist-date mono">{date}</div>
                       <div className="hist-time mono">{time} · {m.duration}</div>
                     </div>
-                    <div className="hist-client">
+                    <div className="hist-client" onClick={(e) => e.stopPropagation()}>
                       <div className="hist-avatar" style={{ background: m.avatar }}>
                         {m.client[0]}
                       </div>
-                      <div>
-                        <div className="hist-client-name">
-                          {m.client}
-                          {m.sharedBy && (
-                            <span className="shared-badge" title={`Shared by ${m.sharedBy.name}, ${m.sharedAt ?? ""}`}>
-                              ↗ {m.sharedBy.initials}
-                            </span>
-                          )}
-                        </div>
+                      <div style={{ position: "relative", minWidth: 0, flex: 1 }}>
+                        {editingField?.id === m.id && editingField.field === "client" ? (
+                          <div style={{ position: "relative" }}>
+                            <input
+                              ref={editInputRef}
+                              type="text"
+                              className="hist-inline-input"
+                              value={editDraft}
+                              autoFocus
+                              onChange={(e) => handleClientInput(e.target.value)}
+                              onKeyDown={handleEditKeyDown}
+                              onBlur={() => setTimeout(commitEdit, 150)}
+                            />
+                            {clientSuggestions.length > 0 && (
+                              <div className="hist-suggest">
+                                {clientSuggestions.map((name, i) => (
+                                  <div
+                                    key={name}
+                                    className={`hist-suggest-item${i === selectedSuggestion ? " active" : ""}`}
+                                    onMouseDown={(e) => { e.preventDefault(); selectSuggestion(name); }}
+                                  >
+                                    {name}
+                                  </div>
+                                ))}
+                                {!knownClients.some((c) => c.toLowerCase() === editDraft.trim().toLowerCase()) && editDraft.trim() && (
+                                  <div
+                                    className="hist-suggest-item new-client"
+                                    onMouseDown={(e) => { e.preventDefault(); commitEdit(); }}
+                                  >
+                                    + Create "{editDraft.trim()}"
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {clientSuggestions.length === 0 && editDraft.trim() && !knownClients.some((c) => c.toLowerCase() === editDraft.trim().toLowerCase()) && (
+                              <div className="hist-suggest">
+                                <div
+                                  className="hist-suggest-item new-client"
+                                  onMouseDown={(e) => { e.preventDefault(); commitEdit(); }}
+                                >
+                                  + Create "{editDraft.trim()}"
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            className="hist-client-name hist-editable"
+                            onClick={(e) => startEditing(e, m.id, "client", m.client)}
+                            title="Click to edit client"
+                          >
+                            {m.client}
+                            {m.sharedBy && (
+                              <span className="shared-badge" title={`Shared by ${m.sharedBy.name}, ${m.sharedAt ?? ""}`}>
+                                ↗ {m.sharedBy.initials}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {m.participants && m.participants.length > 0 && (
                           <div className="hist-participants mono">
                             {m.participants.slice(0, 2).join(", ")}
@@ -306,8 +431,26 @@ export function Dashboard() {
                         )}
                       </div>
                     </div>
-                    <div className="hist-title">
-                      {m.title}
+                    <div className="hist-title" onClick={(e) => e.stopPropagation()}>
+                      {editingField?.id === m.id && editingField.field === "title" ? (
+                        <input
+                          type="text"
+                          className="hist-inline-input"
+                          value={editDraft}
+                          autoFocus
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          onKeyDown={handleEditKeyDown}
+                          onBlur={commitEdit}
+                        />
+                      ) : (
+                        <span
+                          className="hist-editable"
+                          onClick={(e) => startEditing(e, m.id, "title", m.title)}
+                          title="Click to edit title"
+                        >
+                          {m.title}
+                        </span>
+                      )}
                       {m.status === "live" && (
                         <span
                           style={{

@@ -36,6 +36,9 @@ export const dashboardApi = {
   fetchInsights: () =>
     api<CoachInsightsResponse>("/users/me/insights").then((r) => r.items).catch(() => [] as CoachInsight[]),
 
+  patchMeeting: (id: string, patch: Partial<Meeting>) =>
+    api<Meeting>(`/meetings/${id}`, { method: "PATCH", body: patch }),
+
   deleteMeeting: (id: string) =>
     api<{ ok: boolean }>(`/meetings/${id}`, { method: "DELETE" }),
 

@@ -162,6 +162,34 @@
 .sim-dot { background: var(--gc-purple, #7627bb) !important; }
 .hist-hints { font-size: 12px; }
 
+/* Inline editing */
+.hist-editable {
+  cursor: pointer; border-radius: 4px; padding: 1px 4px; margin: -1px -4px;
+  transition: background .15s;
+}
+.hist-editable:hover { background: var(--gc-blue-50, #e8f0fe); }
+.hist-inline-input {
+  font-size: 13px; font-weight: 600; color: var(--text-1); width: 100%;
+  padding: 2px 6px; border: 1.5px solid var(--gc-blue, #1a73e8); border-radius: 5px;
+  background: var(--surface); outline: none; font-family: inherit;
+}
+.hist-suggest {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: 8px; box-shadow: var(--sh-2, 0 4px 12px rgba(0,0,0,.12));
+  margin-top: 4px; max-height: 180px; overflow-y: auto;
+}
+.hist-suggest-item {
+  padding: 7px 10px; font-size: 13px; cursor: pointer; color: var(--text-1);
+}
+.hist-suggest-item:hover, .hist-suggest-item.active {
+  background: var(--gc-blue-50, #e8f0fe);
+}
+.hist-suggest-item.new-client {
+  color: var(--gc-blue, #1a73e8); font-weight: 600;
+  border-top: 1px solid var(--border-soft);
+}
+
 /* Upcoming meetings (calendar) */
 .dash-upcoming { grid-column: 1 / -1; }
 .dash-upcoming-head {
