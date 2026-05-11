@@ -12,88 +12,94 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return reply.code(403).send({ code: "forbidden", message: "Admin only" } as never);
     }
 
-    if (!isFirestoreEnabled()) {
-      return { users: [] };
+    const users: AdminUser[] = [];
+
+    // 1. List all Firebase Auth users (actual logged-in Google accounts)
+    const authUsers = new Map<string, { email: string; name: string; photoUrl?: string }>();
+    try {
+      const { getApps } = await import("firebase-admin/app");
+      const { getAuth } = await import("firebase-admin/auth");
+      const adminApp = getApps()[0];
+      if (adminApp) {
+        let nextPageToken: string | undefined;
+        do {
+          const result = await getAuth(adminApp).listUsers(1000, nextPageToken);
+          for (const u of result.users) {
+            authUsers.set(u.uid, {
+              email: u.email ?? u.uid,
+              name: u.displayName ?? "",
+              photoUrl: u.photoURL,
+            });
+          }
+          nextPageToken = result.pageToken;
+        } while (nextPageToken);
+      }
+    } catch (err) {
+      console.warn(`[admin] listUsers failed: ${(err as Error).message}`);
     }
 
-    const snap = await getDb().collection("meetings").get();
-    const byOwner = new Map<string, {
-      email: string;
-      name: string;
+    // 2. Count meetings per owner from Firestore
+    const meetingStats = new Map<string, {
       count: number;
       simCount: number;
       totalMinutes: number;
       lastDate: string;
     }>();
 
-    for (const doc of snap.docs) {
-      const d = doc.data();
-      const uid = d.ownerUid as string;
-      if (!uid) continue;
+    if (isFirestoreEnabled()) {
+      try {
+        const snap = await getDb().collection("meetings").get();
+        for (const doc of snap.docs) {
+          const d = doc.data();
+          const uid = d.ownerUid as string;
+          if (!uid) continue;
 
-      const cur = byOwner.get(uid) ?? {
-        email: uid,
-        name: "",
-        count: 0,
-        simCount: 0,
-        totalMinutes: 0,
-        lastDate: "",
-      };
+          const cur = meetingStats.get(uid) ?? { count: 0, simCount: 0, totalMinutes: 0, lastDate: "" };
+          cur.count++;
+          if (d.meetingType === "simulation") cur.simCount++;
 
-      cur.count++;
-      if (d.meetingType === "simulation") cur.simCount++;
+          if (d.startedAt && d.endedAt) {
+            const mins = (Date.parse(d.endedAt) - Date.parse(d.startedAt)) / 60000;
+            if (mins > 0 && mins < 600) cur.totalMinutes += mins;
+          }
 
-      // Calculate duration in minutes
-      if (d.startedAt && d.endedAt) {
-        const mins = (Date.parse(d.endedAt) - Date.parse(d.startedAt)) / 60000;
-        if (mins > 0 && mins < 600) cur.totalMinutes += mins;
+          const date = (d.updatedAt ?? d.createdAt ?? "") as string;
+          if (date > cur.lastDate) cur.lastDate = date;
+
+          meetingStats.set(uid, cur);
+        }
+      } catch (err) {
+        console.warn(`[admin] meetings query failed: ${(err as Error).message}`);
       }
-
-      const date = (d.updatedAt ?? d.createdAt ?? "") as string;
-      if (date > cur.lastDate) cur.lastDate = date;
-
-      // Extract email/name from meeting participants or owner fields
-      if (d.ownerEmail) cur.email = d.ownerEmail as string;
-      if (d.ownerName) cur.name = d.ownerName as string;
-      // Fallback: check participants for the rep
-      if (!d.ownerEmail && d.participants) {
-        const rep = (d.participants as Array<{ side: string; name: string }>)
-          .find((p) => p.side === "rep");
-        if (rep?.name) cur.name = rep.name;
-      }
-
-      byOwner.set(uid, cur);
     }
 
-    // Try to resolve emails via Firebase Auth for users where we only have uid
-    try {
-      const { getApps } = await import("firebase-admin/app");
-      const { getAuth } = await import("firebase-admin/auth");
-      const adminApp = getApps()[0];
-      if (adminApp) {
-        for (const [uid, info] of byOwner) {
-          if (info.email === uid) {
-            try {
-              const userRecord = await getAuth(adminApp).getUser(uid);
-              if (userRecord.email) info.email = userRecord.email;
-              if (userRecord.displayName) info.name = userRecord.displayName;
-            } catch {}
-          }
-        }
-      }
-    } catch {}
-
-    const users: AdminUser[] = [];
-    for (const [uid, info] of byOwner) {
+    // 3. Merge: start from auth users, enrich with meeting stats
+    for (const [uid, info] of authUsers) {
+      const stats = meetingStats.get(uid);
       users.push({
         uid,
         email: info.email,
         name: info.name || undefined,
-        meetingCount: info.count,
-        simulationCount: info.simCount,
-        totalMinutes: Math.round(info.totalMinutes),
-        lastMeetingDate: info.lastDate || undefined,
+        meetingCount: stats?.count ?? 0,
+        simulationCount: stats?.simCount ?? 0,
+        totalMinutes: Math.round(stats?.totalMinutes ?? 0),
+        lastMeetingDate: stats?.lastDate || undefined,
       });
+    }
+
+    // 4. Add any meeting owners not in auth (edge case)
+    for (const [uid, stats] of meetingStats) {
+      if (!authUsers.has(uid)) {
+        users.push({
+          uid,
+          email: uid,
+          name: undefined,
+          meetingCount: stats.count,
+          simulationCount: stats.simCount,
+          totalMinutes: Math.round(stats.totalMinutes),
+          lastMeetingDate: stats.lastDate || undefined,
+        });
+      }
     }
 
     users.sort((a, b) => (b.lastMeetingDate ?? "").localeCompare(a.lastMeetingDate ?? ""));
