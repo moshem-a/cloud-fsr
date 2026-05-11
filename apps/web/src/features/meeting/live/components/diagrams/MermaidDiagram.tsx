@@ -20,6 +20,20 @@ mermaid.initialize({
 
 let counter = 0;
 
+function sanitizeMermaid(raw: string): string {
+  let chart = raw.trim();
+  // Strip markdown code fences that LLMs sometimes add
+  chart = chart.replace(/^```(?:mermaid)?\s*\n?/i, "").replace(/\n?```\s*$/, "");
+  // Fix escaped newlines from JSON
+  chart = chart.replace(/\\n/g, "\n");
+  // Remove empty lines that can confuse the parser
+  chart = chart
+    .split("\n")
+    .filter((l) => l.trim().length > 0)
+    .join("\n");
+  return chart;
+}
+
 export function MermaidDiagram({ chart }: { chart: string }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -27,15 +41,20 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     if (!ref.current || !chart) return;
     const id = `mermaid-${++counter}`;
     ref.current.innerHTML = "";
+    const cleaned = sanitizeMermaid(chart);
     mermaid
-      .render(id, chart)
+      .render(id, cleaned)
       .then(({ svg }) => {
         if (ref.current) ref.current.innerHTML = svg;
       })
       .catch((err) => {
         console.warn("[mermaid] render failed", err);
         if (ref.current) {
-          ref.current.innerHTML = `<pre style="font-size:12px;color:var(--text-3);white-space:pre-wrap">${chart}</pre>`;
+          const pre = document.createElement("pre");
+          pre.style.cssText = "font-size:12px;color:var(--text-3);white-space:pre-wrap;padding:8px;margin:0";
+          pre.textContent = cleaned;
+          ref.current.innerHTML = "";
+          ref.current.appendChild(pre);
         }
       });
   }, [chart]);

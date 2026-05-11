@@ -3,7 +3,9 @@ import type { FastifyInstance } from "fastify";
 import { liveRepo } from "../repos/live.repo.ts";
 import { meetingsRepo } from "../repos/meetings.repo.ts";
 import type { TranscriptLine } from "@scoach/types";
-import { getOrCreateSession, handleFinalLine, pushAudio, pushScreenFrame, stopSession } from "../services/audio-session.service.ts";
+import { getOrCreateSession, handleFinalLine, pushAudio, pushScreenFrame, runRollingSummary, stopSession } from "../services/audio-session.service.ts";
+import { summaryRepo } from "../repos/summary.repo.ts";
+import { classifyMeetingType } from "../services/summary.service.ts";
 
 /**
  * Live meeting HTTP API. Replaces the WebSocket flow because Firebase Hosting
@@ -82,9 +84,17 @@ export async function registerLiveRoutes(app: FastifyInstance) {
     if (!m || m.ownerUid !== req.user!.uid) {
       return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
     }
+    // Run final summary BEFORE stopping the session so transcript is fresh
+    const session = getOrCreateSession(req.params.id);
+    await runRollingSummary(session).catch((err) =>
+      console.warn(`[live] final summary on end failed: ${(err as Error).message}`),
+    );
     stopSession(req.params.id);
+    const latest = await summaryRepo.get(req.params.id).catch(() => null);
+    const meetingType = latest ? classifyMeetingType(latest.internal, m) : m.meetingType;
     await meetingsRepo.patch(req.params.id, {
-      status: "ended",
+      status: latest ? "summarized" : "ended",
+      meetingType,
       endedAt: new Date().toISOString(),
     });
     return reply.code(204).send();

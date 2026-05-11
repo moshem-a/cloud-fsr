@@ -433,7 +433,7 @@ async function runInfographicTick(session: ActiveSession): Promise<void> {
   }
 }
 
-async function runRollingSummary(session: ActiveSession): Promise<void> {
+export async function runRollingSummary(session: ActiveSession): Promise<void> {
   if (session.summaryInFlight) return;
   if (session.rollingTranscript.length < 3) return;
   session.summaryInFlight = true;
