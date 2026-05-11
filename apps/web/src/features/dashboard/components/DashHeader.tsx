@@ -68,9 +68,7 @@ export function DashHeader({ onStartNew }: DashHeaderProps) {
           <Link to="/tasks" search={{ client: "" }} activeProps={{ className: "active" }}>Tasks</Link>
           <Link to="/dashboard">Meetings</Link>
           <Link to="/clients" activeProps={{ className: "active" }}>Clients</Link>
-          {email === "moshem@google.com" && (
-            <Link to="/admin" activeProps={{ className: "active" }}>Admin</Link>
-          )}
+
         </nav>
       </div>
       <div className="topbar-center" />
