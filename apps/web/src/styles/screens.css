@@ -73,7 +73,7 @@
 .hist-table { display: flex; flex-direction: column; }
 .hist-row {
   display: grid;
-  grid-template-columns: 110px 200px 1fr 110px 100px 60px 24px;
+  grid-template-columns: 110px 200px 1fr 110px 100px 60px auto;
   gap: 14px; align-items: center;
   padding: 14px 20px; border-top: 1px solid var(--border-soft);
   background: transparent; border-left: 0; border-right: 0; border-bottom: 0;
@@ -144,7 +144,7 @@
 .stage-negotiation   { background: var(--gc-green-50);  color: var(--gc-green); }
 .stage-intro         { background: var(--surface-3);    color: var(--text-2); }
 
-.hist-cta { color: var(--text-4); display: flex; align-items: center; gap: 4px; }
+.hist-cta { color: var(--text-4); display: flex; align-items: center; gap: 4px; overflow: visible; white-space: nowrap; }
 .hist-delete-btn {
   all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 6px; color: var(--text-4); opacity: 0;

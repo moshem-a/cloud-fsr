@@ -6,7 +6,7 @@ import { api } from "../../../../lib/http.ts";
 
 const WS_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
-const MODEL = "models/gemini-2.0-flash-live-001";
+const MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog";
 
 export interface UseGeminiLiveOptions {
   meetingId: string;
