@@ -38,4 +38,7 @@ export const dashboardApi = {
 
   deleteMeeting: (id: string) =>
     api<{ ok: boolean }>(`/meetings/${id}`, { method: "DELETE" }),
+
+  createSimulation: (parentId: string) =>
+    api<Meeting>(`/meetings/${parentId}/simulate`, { method: "POST", body: {} }),
 };

@@ -19,6 +19,7 @@ export async function registerTasksRoutes(app: FastifyInstance) {
       const tasks: TaskView[] = [];
 
       for (const m of meetings) {
+        if (m.meetingType === "simulation") continue;
         const summary = await summaryRepo.get(m.id);
         if (!summary?.internal?.actionItems) continue;
         for (const ai of summary.internal.actionItems) {
@@ -32,6 +33,7 @@ export async function registerTasksRoutes(app: FastifyInstance) {
             what: ai.what ?? "",
             due: ai.due ?? "",
             done: ai.done ?? false,
+            meetingType: m.meetingType,
           });
         }
       }

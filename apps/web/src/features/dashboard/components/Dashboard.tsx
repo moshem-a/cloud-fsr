@@ -1,5 +1,5 @@
 import type { CoachInsight, HistoryItem, TaskView, TeamMember, UserStatsResponse } from "@scoach/types";
-import { Chev, Inbox, Search, Spark, Trash, User as UserIcon } from "@scoach/ui/icons";
+import { Brain, Chev, Inbox, Search, Spark, Trash, User as UserIcon } from "@scoach/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
@@ -178,6 +178,15 @@ export function Dashboard() {
     });
   }
 
+  async function startSimulation(parentId: string) {
+    try {
+      const sim = await dashboardApi.createSimulation(parentId);
+      nav({ to: "/meetings/$id/live", params: { id: sim.id } });
+    } catch {
+      alert("Failed to create simulation. Please try again.");
+    }
+  }
+
   return (
     <div className="dash">
       <DashHeader onStartNew={startNew} />
@@ -347,6 +356,22 @@ export function Dashboard() {
                           Draft
                         </span>
                       )}
+                      {m.meetingType === "simulation" && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            background: "var(--gc-purple-50, #f3e8fd)",
+                            color: "var(--gc-purple, #7627bb)",
+                          }}
+                        >
+                          Simulation
+                        </span>
+                      )}
                       {m.nextStep && (
                         <div className="hist-next">
                           <Chev size={12} /> {m.nextStep}
@@ -380,6 +405,16 @@ export function Dashboard() {
                     </div>
                     <div className="hist-cta" onClick={(e) => e.stopPropagation()}>
                       <HistShareBtn meeting={m} team={team} />
+                      {m.meetingType !== "simulation" && (m.status === "ended" || m.status === "summarized") && (
+                        <button
+                          type="button"
+                          className="hist-sim-btn"
+                          title="Simulate next meeting with this client"
+                          onClick={() => startSimulation(m.id)}
+                        >
+                          <Brain size={15} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="hist-delete-btn"

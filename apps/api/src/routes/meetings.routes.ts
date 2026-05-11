@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
 import { meetingsRepo } from "../repos/meetings.repo.ts";
+import { summaryRepo } from "../repos/summary.repo.ts";
 
 export async function registerMeetingsRoutes(app: FastifyInstance) {
   app.get<{ Reply: ListMeetingsResponse }>("/meetings", async (req) => {
@@ -87,6 +88,49 @@ export async function registerMeetingsRoutes(app: FastifyInstance) {
       const updated = await meetingsRepo.patch(req.params.id, req.body);
       if (!updated) return reply.code(500).send({ code: "patch-failed", message: "Patch failed" });
       return reply.send(updated);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Reply: Meeting | { code: string; message: string } }>(
+    "/meetings/:id/simulate",
+    async (req, reply) => {
+      const parent = await meetingsRepo.get(req.params.id);
+      if (!parent) return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+      if (parent.ownerUid !== req.user!.uid) {
+        return reply.code(403).send({ code: "forbidden", message: "Not your meeting" });
+      }
+
+      const summary = await summaryRepo.get(parent.id);
+      const actionItems = summary?.internal?.actionItems ?? [];
+      const goalParts = [`Practice follow-up with ${parent.account.name}.`];
+      if (actionItems.length > 0) {
+        goalParts.push(`Open items: ${actionItems.filter((a) => !a.done).map((a) => a.what).join("; ")}`);
+      }
+      if (summary?.internal?.couldImprove?.length) {
+        goalParts.push(`Focus on: ${summary.internal.couldImprove.slice(0, 2).join("; ")}`);
+      }
+
+      const now = new Date().toISOString();
+      const sim: Meeting = {
+        id: randomUUID(),
+        ownerUid: req.user!.uid,
+        account: { ...parent.account },
+        title: `Simulation — ${parent.title}`,
+        goal: goalParts.join(" "),
+        stage: parent.stage,
+        meetingType: "simulation",
+        parentMeetingId: parent.id,
+        language: parent.language,
+        participants: parent.participants.map((p) => ({ ...p })),
+        contextFiles: [],
+        contextItems: parent.contextItems ? [...parent.contextItems] : [],
+        notes: [],
+        status: "draft",
+        createdAt: now,
+        updatedAt: now,
+      };
+      await meetingsRepo.create(sim);
+      return reply.code(201).send(sim);
     },
   );
 

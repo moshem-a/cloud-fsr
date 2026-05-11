@@ -1,6 +1,6 @@
-import type { Meeting } from "@scoach/types";
+import type { Meeting, MeetingSummary } from "@scoach/types";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../../../../lib/http.ts";
 import { preMeetingApi } from "../../../premeeting/api.ts";
@@ -8,6 +8,8 @@ import { useAudioCapture } from "../audio/useAudioCapture.ts";
 import { useAudioUploader } from "../audio/useAudioUploader.ts";
 import { useMicCapture } from "../audio/useMicCapture.ts";
 import { useScreenCapture } from "../audio/useScreenCapture.ts";
+import { buildSimulationPrompt } from "../gemini/buildSimulationPrompt.ts";
+import { useGeminiLive } from "../gemini/useGeminiLive.ts";
 import { useLiveMeeting } from "../hooks/useLiveMeeting.ts";
 import { useLiveMeetingStore } from "../store.ts";
 import { AppHeader } from "./AppHeader.tsx";
@@ -21,20 +23,38 @@ export interface LiveMeetingScreenProps {
 }
 
 export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
-  // Subscribe to Firestore live subcollections (transcript / hints / sentiment).
   useLiveMeeting(meetingId);
 
   const setListening = useLiveMeetingStore((s) => s.setListening);
   const muted = useLiveMeetingStore((s) => s.muted);
   const nav = useNavigate();
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [parentSummary, setParentSummary] = useState<MeetingSummary | null>(null);
 
-  // Two parallel uploader instances — tab audio is the customer side
-  // (labeled "Client"), mic audio is the rep side (labeled "You"). Both
-  // POST to the same endpoint with a ?source= query so the server routes
-  // to the correct STT stream.
+  const isSimulation = meeting?.meetingType === "simulation";
+
   const tabUploader = useAudioUploader({ meetingId, source: "tab" });
   const micUploader = useAudioUploader({ meetingId, source: "mic" });
+
+  // Build simulation prompt from parent meeting context
+  const simPrompt = useMemo(() => {
+    if (!isSimulation || !meeting) return "";
+    return buildSimulationPrompt({
+      clientName: meeting.account.name || "the client",
+      contactName: meeting.participants.find((p) => p.side === "client")?.name,
+      contactRole: meeting.participants.find((p) => p.side === "client")?.role,
+      industry: meeting.account.industry,
+      stage: meeting.stage,
+      meetingGoal: meeting.goal,
+      summary: parentSummary,
+    });
+  }, [isSimulation, meeting, parentSummary]);
+
+  const geminiLive = useGeminiLive({
+    meetingId,
+    systemInstruction: simPrompt,
+    enabled: isSimulation,
+  });
 
   const handleTabFrame = useCallback(
     (frame: { pcm: Int16Array }) => {
@@ -45,8 +65,11 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
   const handleMicFrame = useCallback(
     (frame: { pcm: Int16Array }) => {
       micUploader.push(frame.pcm);
+      if (isSimulation) {
+        geminiLive.sendAudio(frame.pcm);
+      }
     },
-    [micUploader],
+    [micUploader, isSimulation, geminiLive],
   );
 
   const audio = useAudioCapture({ onFrame: handleTabFrame, paused: muted });
@@ -54,6 +77,11 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
   useScreenCapture({ stream: audio.stream, meetingId });
 
   const startWithPrompt = useCallback(async () => {
+    if (isSimulation) {
+      geminiLive.connect();
+      void mic.start();
+      return;
+    }
     const wantShare = window.confirm(
       "Would you like to share your screen?\n\nThis captures the customer's audio from a shared Chrome tab.\n\nClick OK to share screen, or Cancel to start with mic only.",
     );
@@ -63,15 +91,12 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
     } else {
       void mic.start();
     }
-  }, [mic, audio]);
+  }, [mic, audio, isSimulation, geminiLive]);
 
-  // Adds (or switches) the screen share. Used by the share preview's Enable /
-  // Switch button. Independent of the mic — won't stop or restart the mic.
   const startScreenShare = useCallback(async () => {
     void audio.start();
   }, [audio]);
 
-  // Stops just the screen share (rep can keep talking via mic).
   const stopScreenShare = useCallback(() => {
     audio.stop();
   }, [audio]);
@@ -83,10 +108,14 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
       .then((m) => {
         if (cancelled) return;
         setMeeting(m);
-        // Hydrate notes from the persisted meeting doc so closing the tab and
-        // returning doesn't lose the rep's private notes.
         if (m?.notes && m.notes.length > 0) {
           useLiveMeetingStore.getState().setNotes(m.notes);
+        }
+        // Load parent meeting summary for simulation context
+        if (m?.meetingType === "simulation" && m.parentMeetingId) {
+          api<{ summary: MeetingSummary }>(`/meetings/${m.parentMeetingId}/summary-data`)
+            .then((r) => { if (!cancelled) setParentSummary(r.summary); })
+            .catch(() => {});
         }
       })
       .catch(() => {
@@ -97,8 +126,6 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
     };
   }, [meetingId]);
 
-  // Listening reflects EITHER mic OR audio (screen) capture state — the meeting
-  // is "live" as long as some stream is active.
   useEffect(() => {
     const live = audio.capturing || mic.capturing;
     setListening(live);
@@ -108,7 +135,6 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
     }).catch(() => {});
   }, [audio.capturing, mic.capturing, setListening, meetingId]);
 
-  // Stop both captures on unmount.
   useEffect(() => {
     return () => {
       audio.stop();
@@ -117,6 +143,9 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
   }, [audio.stop, mic.stop]);
 
   async function handleEnd() {
+    if (isSimulation) {
+      geminiLive.disconnect();
+    }
     audio.stop();
     mic.stop();
     await Promise.all([tabUploader.flush(), micUploader.flush()]);
@@ -130,16 +159,24 @@ export function LiveMeetingScreen({ meetingId }: LiveMeetingScreenProps) {
 
   return (
     <div className="app">
-      <AppHeader meeting={meeting} onToggleListening={startWithPrompt} onEnd={handleEnd} />
+      <AppHeader
+        meeting={meeting}
+        onToggleListening={startWithPrompt}
+        onEnd={handleEnd}
+        isSimulation={isSimulation}
+        simulationConnected={geminiLive.connected}
+        simulationError={geminiLive.error}
+      />
       <ResizableMain
         rail={
           <ContextRail
             meeting={meeting}
-            stream={audio.stream}
-            rmsDb={audio.rmsDb}
-            error={audio.error}
-            onPickSource={startScreenShare}
-            onStopShare={stopScreenShare}
+            isSimulation={isSimulation}
+            stream={isSimulation ? null : audio.stream}
+            rmsDb={isSimulation ? -Infinity : audio.rmsDb}
+            error={isSimulation ? null : audio.error}
+            onPickSource={isSimulation ? undefined : startScreenShare}
+            onStopShare={isSimulation ? undefined : stopScreenShare}
             micCapturing={mic.capturing}
             micError={mic.error}
           />

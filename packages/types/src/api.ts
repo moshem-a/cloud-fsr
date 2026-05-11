@@ -154,6 +154,7 @@ export interface TaskView {
   what: string;
   due: string;
   done: boolean;
+  meetingType?: string;
 }
 export interface ListTasksResponse {
   items: TaskView[];

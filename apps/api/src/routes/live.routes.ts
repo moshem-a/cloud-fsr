@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 
 import { liveRepo } from "../repos/live.repo.ts";
 import { meetingsRepo } from "../repos/meetings.repo.ts";
-import { pushAudio, pushScreenFrame, stopSession } from "../services/audio-session.service.ts";
+import type { TranscriptLine } from "@scoach/types";
+import { getOrCreateSession, handleFinalLine, pushAudio, pushScreenFrame, stopSession } from "../services/audio-session.service.ts";
 
 /**
  * Live meeting HTTP API. Replaces the WebSocket flow because Firebase Hosting
@@ -101,6 +102,22 @@ export async function registerLiveRoutes(app: FastifyInstance) {
     await meetingsRepo.patch(req.params.id, {
       notes: [...(m.notes ?? []), note],
     });
+    return reply.code(204).send();
+  });
+
+  // Direct transcript line injection — used by the simulation feature.
+  // The browser sends Gemini Live's text responses as client transcript lines,
+  // which then flow through the same hint/sentiment/infographic pipeline.
+  app.post<{
+    Params: { id: string };
+    Body: TranscriptLine;
+  }>("/meetings/:id/transcript", async (req, reply) => {
+    const m = await meetingsRepo.get(req.params.id);
+    if (!m || m.ownerUid !== req.user!.uid) {
+      return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+    }
+    const session = getOrCreateSession(req.params.id);
+    await handleFinalLine(session, req.body);
     return reply.code(204).send();
   });
 

@@ -19,6 +19,9 @@ export interface AppHeaderProps {
   meeting: Meeting;
   onToggleListening: () => void;
   onEnd: () => void;
+  isSimulation?: boolean;
+  simulationConnected?: boolean;
+  simulationError?: string | null;
 }
 
 function ThemeButton() {
@@ -54,7 +57,7 @@ function elapsed(startedAt: number | null) {
   return `${m}:${s}`;
 }
 
-export function AppHeader({ meeting, onToggleListening, onEnd }: AppHeaderProps) {
+export function AppHeader({ meeting, onToggleListening, onEnd, isSimulation, simulationConnected, simulationError }: AppHeaderProps) {
   const { listening, muted, langMode, latencyMs, startedAt, setLangMode, setMuted } = useLiveMeetingStore();
   const confirmLeave = useConfirmLeaveLiveMeeting();
 
@@ -91,8 +94,12 @@ export function AppHeader({ meeting, onToggleListening, onEnd }: AppHeaderProps)
 
       <div className="topbar-center">
         <div className="status-bar">
-          <span className="live-dot" />
-          <span className="status-bar-label">{listening ? "LIVE" : "PAUSED"}</span>
+          <span className={`live-dot${isSimulation ? " sim-dot" : ""}`} />
+          <span className="status-bar-label">
+            {isSimulation
+              ? simulationConnected ? "SIMULATION" : "SIM · CONNECTING"
+              : listening ? "LIVE" : "PAUSED"}
+          </span>
           <span className="status-bar-time">{elapsed(startedAt)}</span>
           <span className="status-bar-sep" />
           <span className="status-bar-meta">
@@ -143,13 +150,21 @@ export function AppHeader({ meeting, onToggleListening, onEnd }: AppHeaderProps)
           <span>{muted ? "Listening muted" : "Mute listening"}</span>
         </button>
 
+        {simulationError && (
+          <span style={{ fontSize: 12, color: "var(--gc-red, #d93025)" }}>{simulationError}</span>
+        )}
+
         <button
           type="button"
-          className={`pill-btn primary ${listening ? "recording" : ""}`}
-          onClick={listening ? onEnd : onToggleListening}
+          className={`pill-btn primary ${listening || simulationConnected ? "recording" : ""}`}
+          onClick={listening || simulationConnected ? onEnd : onToggleListening}
         >
-          {listening ? <Stop size={14} /> : <Play size={14} />}
-          <span>{listening ? "End meeting" : "Start listening"}</span>
+          {listening || simulationConnected ? <Stop size={14} /> : <Play size={14} />}
+          <span>
+            {isSimulation
+              ? simulationConnected ? "End simulation" : "Start simulation"
+              : listening ? "End meeting" : "Start listening"}
+          </span>
         </button>
 
       </div>

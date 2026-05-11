@@ -1,7 +1,7 @@
 import type { HexColor, ISO8601, UUID } from "./index.ts";
 
 export type MeetingStage = "Intro" | "Discovery" | "Qualification" | "Negotiation";
-export type MeetingType = "sales" | "upsell" | "technical" | "onboarding" | "review" | "other";
+export type MeetingType = "sales" | "upsell" | "technical" | "onboarding" | "review" | "other" | "simulation";
 export type SpeakerSide = "client" | "rep";
 export type LangCode = "en" | "he";
 export type Sentiment = "buying" | "concern" | "positive" | "neutral";
@@ -142,6 +142,7 @@ export interface Meeting {
   goal?: string;
   stage: MeetingStage;
   meetingType?: MeetingType;
+  parentMeetingId?: string;
   language: "auto" | LangCode;
   scheduledAt?: ISO8601;
   startedAt?: ISO8601;

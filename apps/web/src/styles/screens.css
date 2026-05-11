@@ -152,6 +152,14 @@
 }
 .hist-row:hover .hist-delete-btn { opacity: 1; }
 .hist-delete-btn:hover { background: var(--gc-red-50, #fce8e6); color: var(--gc-red, #d93025); }
+.hist-sim-btn {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px; color: var(--text-4); opacity: 0;
+  transition: opacity .15s, background .15s, color .15s;
+}
+.hist-row:hover .hist-sim-btn { opacity: 1; }
+.hist-sim-btn:hover { background: var(--gc-purple-50, #f3e8fd); color: var(--gc-purple, #7627bb); }
+.sim-dot { background: var(--gc-purple, #7627bb) !important; }
 .hist-hints { font-size: 12px; }
 
 /* Upcoming meetings (calendar) */

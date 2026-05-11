@@ -320,7 +320,7 @@ export function pushAudio(meetingId: string, role: SpeakerRole, pcm: Buffer): vo
   s.stt[role].pushAudio(pcm);
 }
 
-async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Promise<void> {
+export async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Promise<void> {
   session.rollingTranscript.push(line);
   // 1. Persist transcript line
   await liveRepo.writeTranscript(session.meetingId, line);
