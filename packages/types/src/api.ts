@@ -211,6 +211,7 @@ export interface AdminUser {
   name?: string;
   meetingCount: number;
   simulationCount: number;
+  totalMinutes: number;
   lastMeetingDate?: string;
 }
 export interface AdminMeetingView {
