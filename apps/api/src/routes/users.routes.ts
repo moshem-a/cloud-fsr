@@ -92,45 +92,93 @@ export async function registerUsersRoutes(app: FastifyInstance) {
   app.get<{ Reply: CoachInsightsResponse }>("/users/me/insights", async (req) => {
     const uid = req.user!.uid;
     const meetings = await meetingsRepo.listForOwner(uid);
-    const topicCounts = new Map<string, number>();
-    const overdueItems: string[] = [];
-    const riskSet = new Set<string>();
     const now = new Date();
 
+    const upsellCounts = new Map<string, number>();
+    const overdueByClient = new Map<string, number>();
+    let totalOverdue = 0;
+    const riskByClient = new Map<string, number>();
+    let totalRisks = 0;
+    let totalHintsActed = 0;
+    let totalHints = 0;
+    let bestScore = 0;
+    let bestClient = "";
+    const clientMeetings = new Map<string, number>();
+
     for (const m of meetings.slice(0, 20)) {
+      const client = m.account?.name || "Unknown";
+      clientMeetings.set(client, (clientMeetings.get(client) ?? 0) + 1);
       try {
         const summary = await summaryRepo.get(m.id);
         if (!summary?.internal) continue;
-        for (const moment of summary.internal.topMoments ?? []) {
-          const words = moment.quote.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
-          for (const w of words) topicCounts.set(w, (topicCounts.get(w) ?? 0) + 1);
+        for (const u of summary.internal.upsell ?? []) {
+          upsellCounts.set(u.name, (upsellCounts.get(u.name) ?? 0) + 1);
         }
-        for (const risk of summary.internal.risks ?? []) riskSet.add(risk);
+        const riskCount = summary.internal.risks?.length ?? 0;
+        if (riskCount > 0) {
+          riskByClient.set(client, (riskByClient.get(client) ?? 0) + riskCount);
+          totalRisks += riskCount;
+        }
         for (const ai of summary.internal.actionItems ?? []) {
           if (!ai.done && ai.due && new Date(ai.due) < now) {
-            overdueItems.push(`${ai.what} (${m.account.name})`);
+            totalOverdue++;
+            overdueByClient.set(client, (overdueByClient.get(client) ?? 0) + 1);
           }
+        }
+        totalHintsActed += summary.internal.hintsActed ?? 0;
+        totalHints += summary.internal.hintsSurfaced ?? 0;
+        if (summary.internal.score > bestScore) {
+          bestScore = summary.internal.score;
+          bestClient = client;
         }
       } catch {}
     }
 
     const insights: CoachInsight[] = [];
-    const repeating = [...topicCounts.entries()]
-      .filter(([, count]) => count >= 3)
-      .sort((a, b) => b[1] - a[1]);
 
-    if (repeating.length > 0) {
-      const top = repeating.slice(0, 3).map(([word, count]) => `"${word}" (${count}x)`).join(", ");
-      insights.push({ icon: "info", title: `Recurring topics across meetings:`, detail: top });
+    // Best performing meeting
+    if (bestScore > 0 && bestClient) {
+      insights.push({ icon: "up", title: `Best meeting score: ${bestScore}/100`, detail: `with ${bestClient}. Keep using the techniques that worked here.` });
     }
-    if (overdueItems.length > 0) {
-      insights.push({ icon: "warn", title: `${overdueItems.length} overdue action item${overdueItems.length > 1 ? "s" : ""}.`, detail: overdueItems.slice(0, 2).join("; ") });
+
+    // Upsell opportunities spotted across meetings
+    const topUpsells = [...upsellCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (topUpsells.length > 0) {
+      const detail = topUpsells.map(([name, count]) => `${name} (${count}x)`).join(", ");
+      insights.push({ icon: "up", title: `Top upsell opportunities:`, detail });
     }
-    if (riskSet.size > 0) {
-      insights.push({ icon: "warn", title: `${riskSet.size} risk${riskSet.size > 1 ? "s" : ""} flagged across meetings.`, detail: [...riskSet].slice(0, 2).join("; ") });
+
+    // Overdue action items — show count + which clients
+    if (totalOverdue > 0) {
+      const topClients = [...overdueByClient.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const detail = topClients.map(([c, n]) => `${c} (${n})`).join(", ");
+      insights.push({ icon: "warn", title: `${totalOverdue} overdue action item${totalOverdue > 1 ? "s" : ""}`, detail: `across ${overdueByClient.size} client${overdueByClient.size > 1 ? "s" : ""}: ${detail}` });
     }
+
+    // Risks — count per client, no raw text
+    if (totalRisks > 0 && insights.length < 3) {
+      const topRiskClients = [...riskByClient.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const detail = topRiskClients.map(([c, n]) => `${c} (${n})`).join(", ");
+      insights.push({ icon: "warn", title: `${totalRisks} risks flagged`, detail: `Top clients to review: ${detail}` });
+    }
+
+    // Hint usage rate
+    if (totalHints > 0 && insights.length < 3) {
+      const pct = Math.round((totalHintsActed / totalHints) * 100);
+      insights.push({ icon: "info", title: `Hint usage: ${pct}%`, detail: `You acted on ${totalHintsActed} of ${totalHints} coaching hints across your meetings.` });
+    }
+
+    // Most active client
+    if (insights.length < 3) {
+      const topClient = [...clientMeetings.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (topClient && topClient[1] > 1) {
+        insights.push({ icon: "info", title: `Most active client: ${topClient[0]}`, detail: `${topClient[1]} meetings. Consider reviewing trends for this account.` });
+      }
+    }
+
+    // Fallback
     if (meetings.length > 0 && insights.length < 3) {
-      insights.push({ icon: "up", title: `${meetings.length} meetings tracked.`, detail: "Keep using Sally to build deeper insights." });
+      insights.push({ icon: "up", title: `${meetings.length} meetings tracked.`, detail: "Keep using Sally to build deeper coaching insights." });
     }
 
     return { items: insights.slice(0, 3) };

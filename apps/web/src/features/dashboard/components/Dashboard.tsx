@@ -647,7 +647,8 @@ export function Dashboard() {
                   <li key={i}>
                     <div className="ins-icon" style={iconStyle}>{iconChar}</div>
                     <div>
-                      <b>{ins.title}</b> {ins.detail}
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{ins.title}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.4 }}>{ins.detail}</div>
                     </div>
                   </li>
                 );
