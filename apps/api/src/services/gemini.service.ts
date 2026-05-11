@@ -319,11 +319,14 @@ Example mermaid values:
 
 Rules:
 - Keep charts simple: 4-8 nodes max. Rep glances at it in 3 seconds.
-- Use short labels (max 20 chars per node)
+- Use short labels (max 20 chars per node). Only use plain alphanumeric text and spaces in labels.
 - Match the language of the conversation (Hebrew transcript → Hebrew labels)
 - Focus on what helps the rep RIGHT NOW: architecture being discussed, comparison with competitor, next steps, pricing breakdown
 - Use proper Mermaid syntax — no markdown fences, just the raw diagram code
-- Escape special characters in labels using quotes when needed`;
+- ALWAYS wrap node labels in double quotes inside brackets: A["My Label"] not A[My Label]
+- NEVER use parentheses, ampersands, angle brackets, or special characters in unquoted labels
+- NEVER use the word "end" as a node ID (it is a reserved keyword) — use "End_" instead
+- Use \\n for newlines in the mermaid string (it will be in a JSON value)`;
 
 export interface InfographicRequest {
   rollingTranscript: TranscriptLine[];
