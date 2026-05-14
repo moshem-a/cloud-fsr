@@ -120,7 +120,7 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     infographicImages: [],
     activeImageIndex: 0,
     pinnedChartIds: new Set<string>(),
-    hintThreshold: 0.91,
+    hintThreshold: 0.85,
     imageIntervalMin: 5,
     infographicGenerating: false,
 
@@ -153,7 +153,7 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         infographicImages: [],
         activeImageIndex: 0,
         pinnedChartIds: new Set<string>(),
-        hintThreshold: 0.91,
+        hintThreshold: 0.85,
         imageIntervalMin: 5,
         infographicGenerating: false,
       }),

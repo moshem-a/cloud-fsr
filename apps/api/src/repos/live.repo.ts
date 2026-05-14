@@ -125,12 +125,11 @@ export const liveRepo = {
     const fileName = `${meetingId}/${img.id}.${ext}`;
     const bucket = gcs().bucket(BUCKET);
     const file = bucket.file(fileName);
-    const buf = Buffer.from(img.imageBase64, "base64");
+    const buf = Buffer.from(img.imageBase64!, "base64");
     await file.save(buf, { contentType: img.mimeType, resumable: false });
-    const [url] = await file.getSignedUrl({
-      action: "read",
-      expires: Date.now() + 30 * 24 * 60 * 60 * 1000,
-    });
+
+    const url = `/meetings/${meetingId}/infographic-images/${img.id}.${ext}`;
+
     await getDb()
       .collection("meetings")
       .doc(meetingId)
@@ -143,6 +142,17 @@ export const liveRepo = {
         prompt: img.prompt,
         generatedAt: img.generatedAt,
       });
+  },
+
+  async readInfographicImage(fileName: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+    try {
+      const file = gcs().bucket(BUCKET).file(fileName);
+      const [buf] = await file.download();
+      const [meta] = await file.getMetadata();
+      return { buffer: buf, contentType: (meta.contentType as string) ?? "image/png" };
+    } catch {
+      return null;
+    }
   },
 
   async writeTip(meetingId: string, tip: { id: string; text: string; at: number }): Promise<void> {

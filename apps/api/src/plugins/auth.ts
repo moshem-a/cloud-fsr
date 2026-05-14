@@ -38,6 +38,7 @@ export async function registerAuth(app: FastifyInstance, config: Config) {
     const path = req.url.split("?")[0] ?? "";
     if (PUBLIC_PATHS.has(path)) return;
     if (req.url.startsWith("/ws/")) return; // WS upgrade is auth'd via query token
+    if (/\/meetings\/[^/]+\/infographic-images\//.test(path)) return;
 
     const auth = req.headers.authorization;
     if (!auth?.startsWith("Bearer ")) {

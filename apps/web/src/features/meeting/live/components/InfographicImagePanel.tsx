@@ -1,8 +1,21 @@
+import type { InfographicImage } from "@scoach/types";
 import { Chev, Close, Expand, Image } from "@scoach/ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../../../../lib/http.ts";
 import { useLiveMeetingStore } from "../store.ts";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL === undefined
+  ? "http://localhost:8080"
+  : (import.meta.env.VITE_API_BASE_URL as string);
+
+function imgSrc(img: InfographicImage): string {
+  if (img.imageUrl) {
+    if (img.imageUrl.startsWith("http")) return img.imageUrl;
+    return `${API_BASE}${img.imageUrl}`;
+  }
+  return `data:${img.mimeType};base64,${img.imageBase64}`;
+}
 
 export interface InfographicImagePanelProps {
   meetingId: string;
@@ -135,7 +148,7 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
 
           <div className="ig-carousel-slide" style={{ display: "flex", justifyContent: "center", alignItems: "center", position: "relative" }}>
             <img
-              src={current.imageUrl ?? `data:${current.mimeType};base64,${current.imageBase64}`}
+              src={imgSrc(current)}
               alt={current.prompt}
               style={{ maxWidth: "100%", maxHeight: 400, borderRadius: 8, objectFit: "contain", cursor: "pointer" }}
               onDoubleClick={() => setExpanded(true)}
@@ -168,7 +181,7 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
             <Close size={20} />
           </button>
           <img
-            src={current.imageUrl ?? `data:${current.mimeType};base64,${current.imageBase64}`}
+            src={imgSrc(current)}
             alt={current.prompt}
             className="ig-lightbox-img"
             onClick={(e) => e.stopPropagation()}

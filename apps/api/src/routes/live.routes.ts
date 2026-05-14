@@ -193,4 +193,17 @@ export async function registerLiveRoutes(app: FastifyInstance) {
     void triggerInfographicImage(req.params.id, req.body?.hintTopic);
     return reply.code(202).send({ status: "generating" });
   });
+
+  app.get<{
+    Params: { id: string; file: string };
+  }>("/meetings/:id/infographic-images/:file", async (req, reply) => {
+    const result = await liveRepo.readInfographicImage(`${req.params.id}/${req.params.file}`);
+    if (!result) {
+      return reply.code(404).send({ code: "not-found", message: "Image not found" });
+    }
+    return reply
+      .header("Content-Type", result.contentType)
+      .header("Cache-Control", "public, max-age=86400")
+      .send(result.buffer);
+  });
 }
