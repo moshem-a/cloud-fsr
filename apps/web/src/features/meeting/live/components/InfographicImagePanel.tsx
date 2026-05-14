@@ -1,5 +1,5 @@
-import { Chev, Image } from "@scoach/ui/icons";
-import { useCallback, useEffect, useRef } from "react";
+import { Chev, Close, Expand, Image } from "@scoach/ui/icons";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../../../../lib/http.ts";
 import { useLiveMeetingStore } from "../store.ts";
@@ -25,6 +25,8 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
     prevCountRef.current = images.length;
   }, [images.length, generating, setGenerating]);
 
+  const [expanded, setExpanded] = useState(false);
+
   const count = images.length;
   const safeIndex = count > 0 ? Math.min(activeIndex, count - 1) : 0;
   const current = count > 0 ? images[safeIndex] : null;
@@ -39,12 +41,13 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && expanded) { setExpanded(false); return; }
       if (e.key === "ArrowLeft") prev();
       if (e.key === "ArrowRight") next();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prev, next]);
+  }, [prev, next, expanded]);
 
   function handleIntervalChange(min: number) {
     setImageInterval(min);
@@ -130,12 +133,21 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
             <Chev size={16} style={{ transform: "rotate(180deg)" }} />
           </button>
 
-          <div className="ig-carousel-slide" style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <div className="ig-carousel-slide" style={{ display: "flex", justifyContent: "center", alignItems: "center", position: "relative" }}>
             <img
               src={current.imageUrl ?? `data:${current.mimeType};base64,${current.imageBase64}`}
               alt={current.prompt}
-              style={{ maxWidth: "100%", maxHeight: 400, borderRadius: 8, objectFit: "contain" }}
+              style={{ maxWidth: "100%", maxHeight: 400, borderRadius: 8, objectFit: "contain", cursor: "pointer" }}
+              onDoubleClick={() => setExpanded(true)}
             />
+            <button
+              type="button"
+              className="ig-expand-btn"
+              onClick={() => setExpanded(true)}
+              title="Expand image"
+            >
+              <Expand size={14} />
+            </button>
           </div>
 
           <button
@@ -147,6 +159,20 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
           >
             <Chev size={16} />
           </button>
+        </div>
+      )}
+
+      {expanded && current && (
+        <div className="ig-lightbox" onClick={() => setExpanded(false)}>
+          <button type="button" className="ig-lightbox-close" onClick={() => setExpanded(false)} aria-label="Close">
+            <Close size={20} />
+          </button>
+          <img
+            src={current.imageUrl ?? `data:${current.mimeType};base64,${current.imageBase64}`}
+            alt={current.prompt}
+            className="ig-lightbox-img"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 
