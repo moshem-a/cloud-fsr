@@ -300,7 +300,9 @@ function isValidComparison(c: unknown): ComparisonTable | undefined {
 // ---------- Infographic generation ----------
 const INFOGRAPHIC_SYSTEM = `You are a real-time Mermaid chart generator for a live sales/technical call. Generate a Mermaid diagram that visualizes what's being discussed RIGHT NOW.
 
-ALWAYS produce a chart. Never skip. Pick the best Mermaid diagram type:
+IMPORTANT: Only generate a chart if the current discussion involves a topic that genuinely benefits from visual representation — architecture, processes, comparisons, timelines, cost breakdowns. If the conversation is casual small talk, greetings, off-topic, or has no chart-worthy content, return: { "skip": true }
+
+Pick the best Mermaid diagram type:
 - flowchart TD: for architecture, processes, data flows, decision trees (use most often)
 - graph LR: for horizontal flows, pipelines, migration paths
 - sequenceDiagram: for interactions between systems or people
@@ -354,8 +356,8 @@ ${transcript}
 Generate a Mermaid chart for what's being discussed right now.`;
     const raw = await streamToText(model, [{ role: "user", parts: [{ text: prompt }] }]);
     const cleaned = extractJson(raw);
-    const parsed = JSON.parse(cleaned || "{}") as { kind?: string; title?: string; mermaid?: string; data?: unknown };
-    if (!parsed.title || !parsed.mermaid) return null;
+    const parsed = JSON.parse(cleaned || "{}") as { kind?: string; title?: string; mermaid?: string; data?: unknown; skip?: boolean };
+    if (parsed.skip || !parsed.title || !parsed.mermaid) return null;
     const kind = (parsed.kind as InfographicKind) || "flow";
     return {
       id: randomUUID(),
@@ -673,13 +675,75 @@ If this is NOT a Google Meet screen, return: { "isMeet": false }`,
   }
 }
 
+// ---------- Infographic image generation (Gemini 2.5 Flash Image / "Nano Banana") ----------
+export async function generateInfographicImage(req: {
+  rollingTranscript: TranscriptLine[];
+  meetingGoal: string;
+  meetingTitle: string;
+  hintTopic?: string;
+}): Promise<{ imageBase64: string; mimeType: string; prompt: string } | null> {
+  if (!PROJECT || req.rollingTranscript.length < 2) return null;
+  try {
+    const { GoogleGenAI, Modality } = await import("@google/genai");
+    const genai = new GoogleGenAI({ vertexai: true, project: PROJECT, location: REGION });
+
+    const transcript = req.rollingTranscript
+      .slice(-15)
+      .map((l) => `[${l.t}] ${l.name}: ${l.text}`)
+      .join("\n");
+
+    const focus = req.hintTopic
+      ? `Focus the infographic on this specific topic: ${req.hintTopic}`
+      : "Create a general meeting summary infographic";
+
+    const prompt = `Create a professional, clean infographic image summarizing this sales meeting.
+Meeting: ${req.meetingTitle || "Sales Call"}
+Goal: ${req.meetingGoal || "General discussion"}
+${focus}
+
+Key discussion points from the transcript:
+${transcript}
+
+Design requirements:
+- Professional business style with clean typography
+- Use a color palette of blues, whites, and light grays (Google Cloud style)
+- Include 3-5 key takeaways or topics as visual sections
+- Add relevant icons or simple illustrations
+- Make it easy to read at a glance
+- Landscape orientation, suitable for a presentation`;
+
+    const response = await genai.models.generateContent({
+      model: "gemini-2.5-flash-image",
+      contents: prompt,
+      config: { responseModalities: [Modality.IMAGE] },
+    });
+
+    const parts = response.candidates?.[0]?.content?.parts;
+    if (!parts) return null;
+
+    for (const part of parts) {
+      if (part.inlineData?.data && part.inlineData.mimeType?.startsWith("image/")) {
+        return {
+          imageBase64: part.inlineData.data,
+          mimeType: part.inlineData.mimeType,
+          prompt,
+        };
+      }
+    }
+    return null;
+  } catch (err) {
+    console.warn(`[gemini] generateInfographicImage failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 // ---------- Action-item detection (auto-notes from both speakers) ----------
 const ACTION_ITEM_EN = /\b(I'll|I will|let me|I can|I'm going to|we'll|we will|follow up|send you|set up|schedule|check on|get back to you|look into|prepare|I need to|I should|can you|could you|please\s+(?:send|share|prepare|schedule|check|provide|set up)|we need|we'd like|we expect|as a next step|by next|by end of|before the|don't forget|make sure|need to|let's schedule|let's set up|we agreed)\b/i;
 
-const ACTION_ITEM_HE = /(?:אני אבדוק|אני אשלח|אני אקבע|אני ארשום|אני אחזור|אני אעביר|אני רוצה לקבוע|אני רוצה לשלוח|אני צריך ל|נשלח לכם|נקבע לכם|צריכים לקבוע|צריך לקבוע|בוא נקבע|בוא נתאם|אתה יכול|תשלח לי|תבדוק|תקבע|נחזור אליך|אחזור אליך|ארשום לעצמי)/;
+const ACTION_ITEM_HE = /(?:אני אבדוק|אני אשלח|אני אקבע|אני ארשום|אני אחזור|אני אעביר|אני רוצה לקבוע|אני רוצה לשלוח|אני צריך ל|נשלח לכם|נקבע לכם|צריכים לקבוע|צריך לקבוע|בוא נקבע|בוא נתאם|אתה יכול|תשלח לי|תבדוק|תקבע|נחזור אליך|אחזור אליך|ארשום לעצמי|צריך לבדוק|צריכים לשלוח|נצטרך ל|בוא נעשה|נעשה את זה|נתקדם עם|אני אטפל|נטפל ב|נשב על|נסכם|בוא נסכם|צריך לתאם|נתאם|לסגור את|נסגור)/;
 
 export function hasActionItemPattern(text: string): boolean {
-  return (ACTION_ITEM_EN.test(text) || ACTION_ITEM_HE.test(text)) && text.trim().length > 15;
+  return (ACTION_ITEM_EN.test(text) || ACTION_ITEM_HE.test(text)) && text.trim().length > 10;
 }
 
 export async function extractActionItem(text: string, speaker: string, lang: "he" | "en"): Promise<string | null> {

@@ -59,7 +59,12 @@ export function HintCard({ hint, meetingId, style }: HintCardProps) {
           <button
             type="button"
             className={`icon-btn xs ${pinned ? "active" : ""}`}
-            onClick={() => togglePinned(hint.id)}
+            onClick={() => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const fn = (window as any).__sallyPinHint as ((id: string) => void) | undefined;
+              if (fn) fn(hint.id);
+              else togglePinned(hint.id);
+            }}
             title="Pin"
           >
             <Pin size={14} />

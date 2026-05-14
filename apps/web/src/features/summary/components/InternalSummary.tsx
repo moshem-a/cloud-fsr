@@ -11,7 +11,23 @@ export function InternalSummary({
   summary: MeetingSummary;
   onSummaryChange: (s: MeetingSummary) => void;
 }) {
-  const s = summary.internal;
+  const raw = summary.internal;
+  const s = {
+    ...raw,
+    wentWell: raw.wentWell ?? [],
+    couldImprove: raw.couldImprove ?? [],
+    upsell: (raw.upsell ?? []).map((u: any) =>
+      typeof u === "string" ? { name: u, reason: "" } : u,
+    ),
+    risks: raw.risks ?? [],
+    needs: raw.needs ?? { stated: [], actual: [] },
+    actionItems: raw.actionItems ?? [],
+    topMoments: (raw.topMoments ?? []).map((m: any) => ({
+      t: m.t ?? "",
+      type: m.type ?? m.label ?? "",
+      quote: m.quote ?? m.note ?? "",
+    })),
+  };
   const [items, setItems] = useState<ActionItem[]>(s.actionItems);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -175,7 +191,7 @@ export function InternalSummary({
           <div className="needs-row">
             <div className="needs-col">
               <div className="needs-kicker">CLIENT STATED</div>
-              {s.needs.stated.map((n, i) => (
+              {(s.needs.stated ?? []).map((n, i) => (
                 <div key={i} className="needs-item needs-stated">
                   {n}
                 </div>
@@ -184,7 +200,7 @@ export function InternalSummary({
             <div className="needs-arrow">›</div>
             <div className="needs-col">
               <div className="needs-kicker" style={{ color: "var(--gc-blue)" }}>COACH INFERRED</div>
-              {s.needs.actual.map((n, i) => (
+              {(s.needs.actual ?? []).map((n, i) => (
                 <div key={i} className="needs-item needs-actual">
                   {n}
                 </div>

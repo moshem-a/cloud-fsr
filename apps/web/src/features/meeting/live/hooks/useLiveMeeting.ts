@@ -1,4 +1,4 @@
-import type { Hint, Infographic, SentimentSample, TranscriptLine } from "@scoach/types";
+import type { Hint, Infographic, InfographicImage, SentimentSample, TranscriptLine } from "@scoach/types";
 import {
   type DocumentData,
   collection,
@@ -160,6 +160,22 @@ export function useLiveMeeting(meetingId: string): void {
         },
       );
       unsubs.push(unsubInfographics);
+
+      const addInfographicImage = useLiveMeetingStore.getState().addInfographicImage;
+      const unsubInfographicImages = onSnapshot(
+        query(collection(meetingRef, "infographicImages"), orderBy("generatedAt", "desc")),
+        (snap) => {
+          for (const change of snap.docChanges()) {
+            if (change.type === "removed") continue;
+            const img = { id: change.doc.id, ...change.doc.data() } as InfographicImage & DocumentData;
+            addInfographicImage(img);
+          }
+        },
+        (err) => {
+          console.warn("[live] infographicImages listener error", err);
+        },
+      );
+      unsubs.push(unsubInfographicImages);
 
       const unsubPartial = onSnapshot(
         doc(meetingRef, "live", "partial"),

@@ -1,7 +1,16 @@
-import type { Hint, Infographic, RepNote, SentimentSample, TranscriptLine } from "@scoach/types";
+import type { Hint, Infographic, InfographicImage, RepNote, SentimentSample, TranscriptLine } from "@scoach/types";
+import { Storage } from "@google-cloud/storage";
 import { randomUUID } from "node:crypto";
 
 import { getDb, isFirestoreEnabled } from "./firestore.ts";
+
+const BUCKET = "scoach-infographics";
+let _storage: Storage | null = null;
+function gcs(): Storage {
+  if (_storage) return _storage;
+  _storage = new Storage();
+  return _storage;
+}
 
 /**
  * Writers for the live-meeting subcollections that the FE listens to via
@@ -110,6 +119,32 @@ export const liveRepo = {
       .set({ ...ig, _at: Date.now() });
   },
 
+  async writeInfographicImage(meetingId: string, img: InfographicImage): Promise<void> {
+    if (!isFirestoreEnabled()) return;
+    const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
+    const fileName = `${meetingId}/${img.id}.${ext}`;
+    const bucket = gcs().bucket(BUCKET);
+    const file = bucket.file(fileName);
+    const buf = Buffer.from(img.imageBase64, "base64");
+    await file.save(buf, { contentType: img.mimeType, resumable: false });
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    });
+    await getDb()
+      .collection("meetings")
+      .doc(meetingId)
+      .collection("infographicImages")
+      .doc(img.id)
+      .set({
+        id: img.id,
+        imageUrl: url,
+        mimeType: img.mimeType,
+        prompt: img.prompt,
+        generatedAt: img.generatedAt,
+      });
+  },
+
   async writeTip(meetingId: string, tip: { id: string; text: string; at: number }): Promise<void> {
     if (!isFirestoreEnabled()) return;
     await getDb()
@@ -136,7 +171,7 @@ export const liveRepo = {
   async clearLive(meetingId: string): Promise<void> {
     if (!isFirestoreEnabled()) return;
     const db = getDb();
-    const subs = ["transcript", "hints", "sentiment", "followups", "tips", "autoNotes", "infographics", "live"];
+    const subs = ["transcript", "hints", "sentiment", "followups", "tips", "autoNotes", "infographics", "infographicImages", "live"];
     for (const sub of subs) {
       const snap = await db.collection("meetings").doc(meetingId).collection(sub).get();
       const batch = db.batch();

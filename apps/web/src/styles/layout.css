@@ -222,15 +222,15 @@
 .notes-empty { font-size: 11.5px; color: var(--text-4); line-height: 1.45; }
 .notes-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .notes-item {
-  display: grid; grid-template-columns: 38px 1fr; gap: 6px;
+  display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline;
   font-size: 12px; line-height: 1.45; color: var(--text-2);
   padding: 6px 8px; background: var(--surface-2); border-radius: var(--r-sm, 4px);
 }
-.notes-time { font-size: 10.5px; color: var(--text-4); }
-.notes-text { color: var(--text-1); word-break: break-word; }
-.notes-row-actions { grid-column: 1 / -1; display: flex; gap: 4px; margin-top: 2px; opacity: 0; transition: opacity .15s var(--ease); }
+.notes-time { font-size: 10.5px; color: var(--text-4); flex-shrink: 0; }
+.notes-text { color: var(--text-1); overflow-wrap: break-word; min-width: 0; flex: 1; }
+.notes-row-actions { width: 100%; display: flex; gap: 4px; margin-top: 2px; opacity: 0; transition: opacity .15s var(--ease); }
 .notes-item:hover .notes-row-actions, .notes-item:focus-within .notes-row-actions { opacity: 1; }
-.notes-edit { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+.notes-edit { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .notes-edit-textarea {
   width: 100%; min-height: 48px; padding: 6px 8px;
   border: 1px solid var(--border); border-radius: var(--r-sm, 4px);
@@ -248,7 +248,7 @@
 .notes-auto-badge {
   font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   background: var(--gc-blue-50); color: var(--gc-blue); padding: 1px 5px; border-radius: 3px;
-  grid-column: 2; margin-bottom: 2px;
+  display: inline; margin-right: 4px; vertical-align: middle;
 }
 .ghost-btn.xs { padding: 2px 8px; font-size: 11px; }
 .ghost-btn.danger { color: var(--gc-red, #b00020); }
@@ -267,6 +267,13 @@
 .hint-compare-rec { margin-top: 4px; padding: 8px 12px; background: var(--gc-blue-50); color: var(--gc-blue); border-radius: var(--r-md); font-size: 12px; font-weight: 500; }
 .hint-compare-topic { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; margin: 6px 0 4px; }
 .hint-priority-high { box-shadow: inset 4px 0 0 var(--gc-red, #b00020); }
+
+.coach-pinned {
+  border-bottom: 2px solid var(--gc-blue-50);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  background: color-mix(in oklab, var(--gc-blue-50) 30%, var(--surface));
+}
 
 /* ───────────── Cards ───────────── */
 .card {

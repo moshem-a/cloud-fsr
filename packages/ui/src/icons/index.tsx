@@ -303,3 +303,11 @@ export const Chart = (p: IconProps) => (
     <path d="M4 20V10M10 20V4M16 20v-8M22 20v-4" />
   </svg>
 );
+
+export const Image = (p: IconProps) => (
+  <svg {...svg(p.size ?? 16, p)} {...base}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <path d="m21 15-5-5L5 21" />
+  </svg>
+);

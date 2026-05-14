@@ -1,8 +1,9 @@
-import { Chart, MicOff, Search } from "@scoach/ui/icons";
+import { Chart, Image, MicOff, Search } from "@scoach/ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useLiveMeetingStore } from "../store.ts";
-import { InfographicPanel } from "./InfographicPanel.tsx";
+import { ChartsPanel } from "./ChartsPanel.tsx";
+import { InfographicImagePanel } from "./InfographicImagePanel.tsx";
 import { QuietBar } from "./QuietBar.tsx";
 import { TranscriptLine } from "./TranscriptLine.tsx";
 
@@ -51,8 +52,11 @@ export function TranscriptPanel({ meetingId }: TranscriptPanelProps) {
       <div className="panel-head">
         <div className="panel-title-row">
           <div className="seg seg-sm right-tab-seg">
-            <button type="button" className={rightTab === "infographics" ? "on" : ""} onClick={() => setRightTab("infographics")}>
-              <Chart size={13} /> Infographics
+            <button type="button" className={rightTab === "infographic" ? "on" : ""} onClick={() => setRightTab("infographic")}>
+              <Image size={13} /> Infographic
+            </button>
+            <button type="button" className={rightTab === "charts" ? "on" : ""} onClick={() => setRightTab("charts")}>
+              <Chart size={13} /> Charts
             </button>
             <button type="button" className={rightTab === "transcript" ? "on" : ""} onClick={() => setRightTab("transcript")}>
               Transcript
@@ -85,8 +89,10 @@ export function TranscriptPanel({ meetingId }: TranscriptPanelProps) {
         )}
       </div>
 
-      {rightTab === "infographics" ? (
-        <InfographicPanel />
+      {rightTab === "infographic" ? (
+        <InfographicImagePanel meetingId={meetingId} />
+      ) : rightTab === "charts" ? (
+        <ChartsPanel />
       ) : (
         <>
           {sttError && (

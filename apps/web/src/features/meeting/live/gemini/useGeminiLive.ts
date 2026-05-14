@@ -6,7 +6,7 @@ import { api } from "../../../../lib/http.ts";
 
 const WS_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
-const MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog";
+const MODEL = "models/gemini-2.0-flash-live-001";
 
 export interface UseGeminiLiveOptions {
   meetingId: string;
@@ -179,7 +179,8 @@ export function useGeminiLive(opts: UseGeminiLiveOptions): GeminiLiveHandle {
     ws.onclose = (ev) => {
       setConnected(false);
       if (ev.code !== 1000) {
-        setError(`Gemini Live disconnected: ${ev.reason || ev.code}`);
+        const detail = ev.reason || `code ${ev.code}`;
+        setError(`Gemini Live disconnected (${detail}). Check your API key and try again.`);
       }
     };
   }, [playAudioChunk, flushTextBuffer]);

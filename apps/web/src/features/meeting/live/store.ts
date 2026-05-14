@@ -1,6 +1,7 @@
 import type {
   Hint,
   Infographic,
+  InfographicImage,
   RepNote,
   SentimentEvent,
   SentimentSample,
@@ -46,9 +47,15 @@ export interface LiveMeetingState {
   liveTips: { id: string; text: string; at: number }[];
 
   infographics: Infographic[];
-  rightPanelTab: "infographics" | "transcript";
+  rightPanelTab: "infographic" | "charts" | "transcript";
   quietInfographic: Infographic | null;
   activeInfographicIndex: number;
+
+  infographicImages: InfographicImage[];
+  activeImageIndex: number;
+  pinnedChartIds: Set<string>;
+  hintThreshold: number;
+  imageIntervalMin: number;
 
   // setters
   reset: () => void;
@@ -70,9 +77,15 @@ export interface LiveMeetingState {
   deleteNote: (index: number) => void;
   addInfographic: (ig: Infographic) => void;
   setInfographics: (igs: Infographic[]) => void;
-  setRightPanelTab: (tab: "infographics" | "transcript") => void;
+  setRightPanelTab: (tab: "infographic" | "charts" | "transcript") => void;
   setQuietInfographic: (ig: Infographic | null) => void;
   setActiveInfographicIndex: (i: number) => void;
+  addInfographicImage: (img: InfographicImage) => void;
+  setInfographicImages: (imgs: InfographicImage[]) => void;
+  setActiveImageIndex: (i: number) => void;
+  togglePinnedChart: (id: string) => void;
+  setHintThreshold: (n: number) => void;
+  setImageIntervalMin: (n: number) => void;
 }
 
 export const useLiveMeetingStore = create<LiveMeetingState>()(
@@ -99,9 +112,14 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     notes: [],
     liveTips: [],
     infographics: [],
-    rightPanelTab: "infographics",
+    rightPanelTab: "infographic",
     quietInfographic: null,
     activeInfographicIndex: 0,
+    infographicImages: [],
+    activeImageIndex: 0,
+    pinnedChartIds: new Set<string>(),
+    hintThreshold: 0.91,
+    imageIntervalMin: 5,
 
     reset: () =>
       set({
@@ -126,9 +144,14 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         notes: [],
         liveTips: [],
         infographics: [],
-        rightPanelTab: "infographics",
+        rightPanelTab: "infographic",
         quietInfographic: null,
         activeInfographicIndex: 0,
+        infographicImages: [],
+        activeImageIndex: 0,
+        pinnedChartIds: new Set<string>(),
+        hintThreshold: 0.91,
+        imageIntervalMin: 5,
       }),
     setConnection: (connected) => set({ connected }),
     setListening: (listening) => set({ listening }),
@@ -229,5 +252,21 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
     setQuietInfographic: (quietInfographic) => set({ quietInfographic }),
     setActiveInfographicIndex: (activeInfographicIndex) => set({ activeInfographicIndex }),
+    addInfographicImage: (img) =>
+      set((s) => {
+        if (s.infographicImages.some((x) => x.id === img.id)) return {};
+        return { infographicImages: [img, ...s.infographicImages].slice(0, 20), activeImageIndex: 0 };
+      }),
+    setInfographicImages: (infographicImages) => set({ infographicImages, activeImageIndex: 0 }),
+    setActiveImageIndex: (activeImageIndex) => set({ activeImageIndex }),
+    togglePinnedChart: (id) =>
+      set((s) => {
+        const next = new Set(s.pinnedChartIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return { pinnedChartIds: next };
+      }),
+    setHintThreshold: (hintThreshold) => set({ hintThreshold }),
+    setImageIntervalMin: (imageIntervalMin) => set({ imageIntervalMin }),
   })),
 );

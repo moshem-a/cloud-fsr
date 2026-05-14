@@ -3,9 +3,10 @@ import type { FastifyInstance } from "fastify";
 import { liveRepo } from "../repos/live.repo.ts";
 import { meetingsRepo } from "../repos/meetings.repo.ts";
 import type { TranscriptLine } from "@scoach/types";
-import { getOrCreateSession, handleFinalLine, pushAudio, pushScreenFrame, runRollingSummary, stopSession } from "../services/audio-session.service.ts";
+import { getOrCreateSession, handleFinalLine, pushAudio, pushScreenFrame, runRollingSummary, setInfographicImageInterval, stopSession, triggerInfographicImage } from "../services/audio-session.service.ts";
 import { summaryRepo } from "../repos/summary.repo.ts";
-import { classifyMeetingType } from "../services/summary.service.ts";
+import { classifyMeetingType, generateMeetingSummary } from "../services/summary.service.ts";
+import { isFirestoreEnabled, getDb } from "../repos/firestore.ts";
 
 /**
  * Live meeting HTTP API. Replaces the WebSocket flow because Firebase Hosting
@@ -90,7 +91,26 @@ export async function registerLiveRoutes(app: FastifyInstance) {
       console.warn(`[live] final summary on end failed: ${(err as Error).message}`),
     );
     stopSession(req.params.id);
-    const latest = await summaryRepo.get(req.params.id).catch(() => null);
+
+    let latest = await summaryRepo.get(req.params.id).catch(() => null);
+
+    // Fallback: if runRollingSummary didn't produce a summary, generate directly from Firestore
+    if (!latest && isFirestoreEnabled()) {
+      try {
+        const snap = await getDb()
+          .collection("meetings").doc(req.params.id)
+          .collection("transcript").orderBy("_at", "asc").get();
+        const transcript = snap.docs.map((d) => d.data() as TranscriptLine);
+        if (transcript.length > 0) {
+          const summary = await generateMeetingSummary(m, transcript);
+          await summaryRepo.write(req.params.id, summary);
+          latest = summary;
+        }
+      } catch (err) {
+        console.warn(`[live] fallback summary on end failed: ${(err as Error).message}`);
+      }
+    }
+
     const meetingType = latest ? classifyMeetingType(latest.internal, m) : m.meetingType;
     await meetingsRepo.patch(req.params.id, {
       status: latest ? "summarized" : "ended",
@@ -148,5 +168,29 @@ export async function registerLiveRoutes(app: FastifyInstance) {
       .filter((n) => n.text.length > 0);
     await meetingsRepo.patch(req.params.id, { notes: cleaned });
     return reply.code(204).send();
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: { intervalMin: number };
+  }>("/meetings/:id/infographic-interval", async (req, reply) => {
+    const m = await meetingsRepo.get(req.params.id);
+    if (!m || m.ownerUid !== req.user!.uid) {
+      return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+    }
+    setInfographicImageInterval(req.params.id, req.body.intervalMin);
+    return reply.code(204).send();
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { hintTopic?: string };
+  }>("/meetings/:id/generate-infographic", async (req, reply) => {
+    const m = await meetingsRepo.get(req.params.id);
+    if (!m || m.ownerUid !== req.user!.uid) {
+      return reply.code(404).send({ code: "not-found", message: "Meeting not found" });
+    }
+    void triggerInfographicImage(req.params.id, req.body?.hintTopic);
+    return reply.code(202).send({ status: "generating" });
   });
 }

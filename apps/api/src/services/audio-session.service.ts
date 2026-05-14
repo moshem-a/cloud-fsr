@@ -14,6 +14,7 @@ import {
   generateFollowups,
   generateHint,
   generateInfographic,
+  generateInfographicImage,
   generateLiveTip,
   generateMeetingName,
   generateQuickAnswer,
@@ -45,7 +46,8 @@ export type { SpeakerRole };
 const SENTIMENT_TICK_MS = 20_000;
 const FOLLOWUPS_TICK_MS = 60_000;
 const TIPS_TICK_MS = 25_000;
-const INFOGRAPHIC_TICK_MS = 20_000;
+const INFOGRAPHIC_TICK_MS = 60_000;
+const INFOGRAPHIC_IMAGE_TICK_MS = 5 * 60 * 1000;
 const SUMMARY_TICK_MS = 4 * 60 * 1000;
 const ROLLING_WINDOW = 12;
 // Hint heuristic: fire a hint cycle on every final transcript line. Dedup via
@@ -100,6 +102,10 @@ interface ActiveSession {
   summaryTick: NodeJS.Timeout | null;
   lastSummaryAt: number;
   summaryInFlight: boolean;
+  // Infographic image generation (Gemini Flash Image)
+  infographicImageTick: NodeJS.Timeout | null;
+  infographicImageIntervalMs: number;
+  infographicImageInFlight: boolean;
   // Google Meet screen detection
   meetInfoExtracted: boolean;
 }
@@ -169,6 +175,9 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     summaryTick: null,
     lastSummaryAt: 0,
     summaryInFlight: false,
+    infographicImageTick: null,
+    infographicImageIntervalMs: INFOGRAPHIC_IMAGE_TICK_MS,
+    infographicImageInFlight: false,
     meetInfoExtracted: false,
   };
 
@@ -258,7 +267,10 @@ export function getOrCreateSession(meetingId: string): ActiveSession {
     session.summaryTick = setInterval(() => {
       void runRollingSummary(session);
     }, SUMMARY_TICK_MS);
-    console.log(`[audio-session] started sentiment+followups+tips+infographic+summary timers for ${meetingId}`);
+    session.infographicImageTick = setInterval(() => {
+      void runInfographicImageTick(session);
+    }, session.infographicImageIntervalMs);
+    console.log(`[audio-session] started sentiment+followups+tips+infographic+image+summary timers for ${meetingId}`);
   } else {
     console.warn(`[audio-session] Gemini disabled (no GCP_PROJECT_ID), skipping hint/sentiment/followups for ${meetingId}`);
   }
@@ -274,6 +286,7 @@ export function stopSession(meetingId: string): void {
   if (s.followupsTick) clearInterval(s.followupsTick);
   if (s.tipsTick) clearInterval(s.tipsTick);
   if (s.infographicTick) clearInterval(s.infographicTick);
+  if (s.infographicImageTick) clearInterval(s.infographicImageTick);
   if (s.summaryTick) clearInterval(s.summaryTick);
   void patchParticipants(s).catch(() => {});
   for (const role of ["rep", "client"] as const) {
@@ -322,6 +335,58 @@ export function pushAudio(meetingId: string, role: SpeakerRole, pcm: Buffer): vo
     });
   }
   s.stt[role].pushAudio(pcm);
+}
+
+export function setInfographicImageInterval(meetingId: string, intervalMin: number): void {
+  const s = sessions.get(meetingId);
+  if (!s) return;
+  const ms = Math.max(2, Math.min(30, intervalMin)) * 60 * 1000;
+  s.infographicImageIntervalMs = ms;
+  if (s.infographicImageTick) clearInterval(s.infographicImageTick);
+  s.infographicImageTick = setInterval(() => {
+    void runInfographicImageTick(s);
+  }, ms);
+}
+
+export async function triggerInfographicImage(meetingId: string, hintTopic?: string): Promise<void> {
+  const s = sessions.get(meetingId);
+  if (s?.infographicImageInFlight) return;
+  if (s) s.infographicImageInFlight = true;
+  try {
+    let transcript = s?.rollingTranscript ?? [];
+    let goal = s?.cachedGoal ?? "";
+    let title = "";
+
+    if (transcript.length < 2 && isFirestoreEnabled()) {
+      const snap = await getDb()
+        .collection("meetings").doc(meetingId)
+        .collection("transcript").orderBy("_at", "asc").get();
+      transcript = snap.docs.map((d) => d.data() as TranscriptLine);
+      const m = await meetingsRepo.get(meetingId).catch(() => null);
+      goal = m?.goal ?? "";
+      title = m?.title ?? "";
+    }
+
+    const result = await generateInfographicImage({
+      rollingTranscript: transcript,
+      meetingGoal: goal,
+      meetingTitle: title,
+      hintTopic,
+    });
+    if (result) {
+      await liveRepo.writeInfographicImage(meetingId, {
+        id: randomUUID(),
+        imageBase64: result.imageBase64,
+        mimeType: result.mimeType,
+        prompt: result.prompt.slice(0, 200),
+        generatedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.warn(`[audio-session] triggerInfographicImage error: ${(err as Error).message}`);
+  } finally {
+    if (s) s.infographicImageInFlight = false;
+  }
 }
 
 export async function handleFinalLine(session: ActiveSession, line: TranscriptLine): Promise<void> {
@@ -393,13 +458,15 @@ export async function handleFinalLine(session: ActiveSession, line: TranscriptLi
 
 const PARTICIPANT_COLORS = ["#EA4335", "#F9AB00", "#1A73E8", "#34A853", "#A142F4", "#E8710A"];
 
+const GENERIC_SPEAKERS = new Set(["client", "you", "speaker 1", "speaker 2", "unknown"]);
+
 async function patchParticipants(session: ActiveSession): Promise<void> {
-  const participants: Participant[] = [];
+  const all: Participant[] = [];
   let i = 0;
   for (const [name, { side }] of session.seenSpeakers) {
     const words = name.split(/\s+/);
     const initials = words.map((w) => w[0]?.toUpperCase() ?? "").join("").slice(0, 2);
-    participants.push({
+    all.push({
       name,
       role: "",
       side,
@@ -408,6 +475,8 @@ async function patchParticipants(session: ActiveSession): Promise<void> {
     });
     i++;
   }
+  const named = all.filter((p) => !GENERIC_SPEAKERS.has(p.name.toLowerCase()));
+  const participants = named.length > 0 ? named : all;
   await meetingsRepo.patch(session.meetingId, { participants }).catch(() => {});
 }
 
@@ -437,14 +506,55 @@ async function runInfographicTick(session: ActiveSession): Promise<void> {
   }
 }
 
+async function runInfographicImageTick(session: ActiveSession): Promise<void> {
+  if (session.infographicImageInFlight) return;
+  session.infographicImageInFlight = true;
+  console.log(`[audio-session] infographic image tick start meeting=${session.meetingId}`);
+  try {
+    let transcript = session.rollingTranscript;
+    let goal = session.cachedGoal;
+    let title = "";
+
+    if (transcript.length < 5 && isFirestoreEnabled()) {
+      const snap = await getDb()
+        .collection("meetings").doc(session.meetingId)
+        .collection("transcript").orderBy("_at", "asc").get();
+      transcript = snap.docs.map((d) => d.data() as TranscriptLine);
+      if (transcript.length < 3) return;
+      const m = await meetingsRepo.get(session.meetingId).catch(() => null);
+      goal = m?.goal ?? goal;
+      title = m?.title ?? "";
+    }
+
+    const result = await generateInfographicImage({
+      rollingTranscript: transcript,
+      meetingGoal: goal,
+      meetingTitle: title,
+    });
+    if (result) {
+      console.log(`[audio-session] infographic image generated meeting=${session.meetingId}`);
+      await liveRepo.writeInfographicImage(session.meetingId, {
+        id: randomUUID(),
+        imageBase64: result.imageBase64,
+        mimeType: result.mimeType,
+        prompt: result.prompt.slice(0, 200),
+        generatedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.warn(`[audio-session] infographic image tick error: ${(err as Error).message}`);
+  } finally {
+    session.infographicImageInFlight = false;
+  }
+}
+
 export async function runRollingSummary(session: ActiveSession): Promise<void> {
   if (session.summaryInFlight) return;
-  if (session.rollingTranscript.length < 3) return;
   session.summaryInFlight = true;
   try {
+    if (!isFirestoreEnabled()) return;
     const m = await meetingsRepo.get(session.meetingId);
     if (!m) return;
-    if (!isFirestoreEnabled()) return;
     const snap = await getDb()
       .collection("meetings")
       .doc(session.meetingId)
@@ -452,11 +562,12 @@ export async function runRollingSummary(session: ActiveSession): Promise<void> {
       .orderBy("_at", "asc")
       .get();
     const transcript = snap.docs.map((d) => d.data() as TranscriptLine);
-    if (transcript.length === 0) return;
+    if (transcript.length === 0 && session.rollingTranscript.length < 3) return;
+    const effectiveTranscript = transcript.length > 0 ? transcript : session.rollingTranscript;
 
     // Auto-detect meeting name if still using default
     if (!m.title || m.title === "New Meeting" || m.title.startsWith("Meeting with")) {
-      const autoName = await generateMeetingName(transcript).catch(() => null);
+      const autoName = await generateMeetingName(effectiveTranscript).catch(() => null);
       if (autoName) {
         await meetingsRepo.patch(session.meetingId, { title: autoName }).catch(() => {});
         m.title = autoName;
@@ -477,7 +588,7 @@ export async function runRollingSummary(session: ActiveSession): Promise<void> {
         ? String(sentSnap.docs[sentSnap.docs.length - 1]!.data().event?.kind ?? "neutral")
         : "neutral";
 
-    const summary = await generateMeetingSummary(m, transcript, {
+    const summary = await generateMeetingSummary(m, effectiveTranscript, {
       hintStats,
       sentimentData: { values: sentValues, lastKind },
     });
@@ -557,7 +668,7 @@ async function generateAndWriteQuickAnswer(session: ActiveSession, line: Transcr
 
 async function detectAndWriteActionItem(session: ActiveSession, line: TranscriptLine): Promise<void> {
   const now = Date.now();
-  if (now - session.lastActionItemAt < 8_000) return;
+  if (now - session.lastActionItemAt < 4_000) return;
   session.lastActionItemAt = now;
   const t0 = Date.now();
   try {

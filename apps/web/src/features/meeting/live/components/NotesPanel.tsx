@@ -116,9 +116,6 @@ export function NotesPanel({ meetingId }: NotesPanelProps) {
           {notes.map((n, i) => (
             <li key={`${n.t}-${i}`} className={`notes-item ${n.source === "auto" ? "notes-item-auto" : ""}`}>
               <span className="mono notes-time">{n.t}</span>
-              {n.source === "auto" && (
-                <span className="notes-auto-badge">Auto</span>
-              )}
               {editingIndex === i && n.source !== "auto" ? (
                 <div className="notes-edit">
                   <textarea
@@ -147,7 +144,10 @@ export function NotesPanel({ meetingId }: NotesPanelProps) {
                 </div>
               ) : (
                 <>
-                  <span className="notes-text">{n.text}</span>
+                  <span className="notes-text">
+                    {n.source === "auto" && <span className="notes-auto-badge">Auto</span>}
+                    {n.text}
+                  </span>
                   <div className="notes-row-actions">
                     {n.source !== "auto" && (
                       <button

@@ -4,6 +4,7 @@ import type {
   InternalSummary,
   Meeting,
   MeetingSummary,
+  Participant,
   TranscriptLine,
 } from "@scoach/types";
 import { randomUUID } from "node:crypto";
@@ -85,13 +86,18 @@ function transcriptToText(transcript: TranscriptLine[]): string {
 async function callPro<T>(systemPrompt: string, userPrompt: string): Promise<T> {
   const model = vertex().getGenerativeModel({
     model: MODEL,
-    generationConfig: { temperature: 0.2, maxOutputTokens: 4096, responseMimeType: "application/json" },
+    generationConfig: { temperature: 0.2, maxOutputTokens: 65536, responseMimeType: "application/json" },
     systemInstruction: { role: "system", parts: [{ text: systemPrompt }] },
   });
   const resp = await model.generateContent({
     contents: [{ role: "user", parts: [{ text: userPrompt }] }],
   });
-  const raw = resp.response.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+  const candidate = resp.response.candidates?.[0];
+  const raw = candidate?.content?.parts?.[0]?.text ?? "{}";
+  if (!raw || raw.trim().length === 0) {
+    console.warn(`[summary] Gemini returned empty response (finishReason: ${candidate?.finishReason})`);
+    throw new Error("Gemini returned empty response");
+  }
   const cleaned = raw.replace(/^```json\s*|\s*```$/g, "").trim();
   return JSON.parse(cleaned || "{}") as T;
 }
@@ -134,7 +140,7 @@ export async function generateClientEmail(
     return { ...defaultClient(meeting), tone };
   }
   try {
-    const participants = meeting.participants.map((p) => `${p.name} (${p.role})`).join(", ");
+    const participants = formatParticipants(meeting.participants).join(", ");
     const prompt = `Meeting: ${meeting.title} with ${meeting.account.name} (${meeting.stage}).
 Goal: ${meeting.goal ?? "(none stated)"}
 Participants: ${participants}
@@ -159,6 +165,14 @@ ${transcriptToText(transcript)}`;
     console.warn(`[summary] generateClientEmail failed: ${(err as Error).message}`);
     return { ...defaultClient(meeting), tone };
   }
+}
+
+const GENERIC_SPEAKERS = new Set(["client", "you", "speaker 1", "speaker 2", "unknown"]);
+
+function formatParticipants(participants: Participant[]): string[] {
+  const named = participants.filter((p) => !GENERIC_SPEAKERS.has(p.name.toLowerCase()));
+  const list = named.length > 0 ? named : participants;
+  return list.map((p) => p.role ? `${p.name} (${p.role})` : p.name);
 }
 
 export interface SummaryExtras {
@@ -202,7 +216,7 @@ export async function generateMeetingSummary(
       duration: meeting.endedAt && meeting.startedAt
         ? `${Math.round((Date.parse(meeting.endedAt) - Date.parse(meeting.startedAt)) / 60_000)} minutes`
         : "—",
-      participants: meeting.participants.map((p) => `${p.name} (${p.role})`),
+      participants: formatParticipants(meeting.participants),
     },
     internal,
     client,

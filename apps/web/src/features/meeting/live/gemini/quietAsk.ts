@@ -19,7 +19,7 @@ export interface QuietAskAnswer {
 }
 
 const ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent";
 
 const SYSTEM = `You are Sally, a private, on-call assistant for a Google Cloud sales rep mid-customer-call.
 The question may be in Hebrew or English — answer in the SAME language as the question.

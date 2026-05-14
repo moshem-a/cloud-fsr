@@ -292,6 +292,15 @@ export interface Infographic {
   generatedAt: string;
 }
 
+export interface InfographicImage {
+  id: string;
+  imageBase64?: string;
+  imageUrl?: string;
+  mimeType: string;
+  prompt: string;
+  generatedAt: string;
+}
+
 export type SharePermission = "view" | "comment" | "edit";
 
 export interface Share {

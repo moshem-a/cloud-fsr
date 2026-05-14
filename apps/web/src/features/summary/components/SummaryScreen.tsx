@@ -23,9 +23,15 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
   const [summary, setSummary] = useState<MeetingSummary | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
 
-  useEffect(() => {
+  const [loadError, setLoadError] = useState(false);
+
+  function triggerLoad() {
+    setSummary(null);
+    setLoadError(false);
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 20;
 
     async function load() {
       try {
@@ -37,6 +43,11 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
         } catch {}
         const poll = () => {
           if (cancelled) return;
+          attempts++;
+          if (attempts > MAX_ATTEMPTS) {
+            if (!cancelled) setLoadError(true);
+            return;
+          }
           pollTimer = setTimeout(async () => {
             try {
               const s = await summaryApi.fetchSummary(meetingId);
@@ -55,6 +66,10 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
       cancelled = true;
       clearTimeout(pollTimer);
     };
+  }
+
+  useEffect(() => {
+    return triggerLoad();
   }, [meetingId]);
 
   async function exportPdf() {
@@ -75,7 +90,7 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
   }
 
   if (!summary) {
-    return <SummaryLoadingOverlay />;
+    return <SummaryLoadingOverlay error={loadError} onRetry={triggerLoad} />;
   }
 
   return (
@@ -129,7 +144,7 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
         </div>
         <div>
           <div className="sum-end-title">
-            Meeting ended · summaries generated in {(summary.generationLatencyMs / 1000).toFixed(1)}s
+            Meeting ended · summaries generated in {((summary.generationLatencyMs ?? 0) / 1000).toFixed(1)}s
           </div>
           <div className="sum-end-sub">
             Audio discarded per privacy policy. Transcript and summary stored in your workspace.
@@ -153,10 +168,11 @@ export function SummaryScreen({ meetingId }: SummaryScreenProps) {
   );
 }
 
-function SummaryLoadingOverlay() {
+function SummaryLoadingOverlay({ error, onRetry }: { error?: boolean; onRetry?: () => void }) {
   const [pct, setPct] = useState(0);
 
   useEffect(() => {
+    if (error) return;
     const start = Date.now();
     const id = setInterval(() => {
       const elapsed = (Date.now() - start) / 1000;
@@ -164,7 +180,7 @@ function SummaryLoadingOverlay() {
       setPct(Math.round(next));
     }, 200);
     return () => clearInterval(id);
-  }, []);
+  }, [error]);
 
   return (
     <div
@@ -184,11 +200,13 @@ function SummaryLoadingOverlay() {
           width: 64,
           height: 64,
           borderRadius: 20,
-          background: "linear-gradient(135deg, #4285f4, #a855f7, #ec4899)",
+          background: error
+            ? "linear-gradient(135deg, #ea4335, #f59e0b)"
+            : "linear-gradient(135deg, #4285f4, #a855f7, #ec4899)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          animation: "summaryPulse 2s ease-in-out infinite",
+          animation: error ? "none" : "summaryPulse 2s ease-in-out infinite",
         }}
       >
         <Brain size={32} style={{ color: "#fff" }} />
@@ -196,44 +214,57 @@ function SummaryLoadingOverlay() {
 
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text-1)" }}>
-          Generating Meeting Summary
+          {error ? "Summary Generation Failed" : "Generating Meeting Summary"}
         </div>
         <div style={{ fontSize: 13, color: "var(--text-3)", marginTop: 6 }}>
-          Analyzing meeting transcript...
+          {error
+            ? "Could not generate summary. The transcript may still be processing."
+            : "Analyzing meeting transcript..."}
         </div>
       </div>
 
-      <div style={{ width: "100%", maxWidth: 320 }}>
-        <div
-          style={{
-            height: 8,
-            borderRadius: 4,
-            background: "var(--surface-2, #e5e7eb)",
-            overflow: "hidden",
-          }}
+      {error ? (
+        <button
+          type="button"
+          className="pill-btn primary"
+          onClick={onRetry}
+          style={{ marginTop: 8 }}
         >
+          Retry Summary
+        </button>
+      ) : (
+        <div style={{ width: "100%", maxWidth: 320 }}>
           <div
             style={{
-              height: "100%",
+              height: 8,
               borderRadius: 4,
-              background: "linear-gradient(90deg, #4285f4, #a855f7, #ec4899)",
-              width: `${pct}%`,
-              transition: "width 0.3s ease-out",
+              background: "var(--surface-2, #e5e7eb)",
+              overflow: "hidden",
             }}
-          />
+          >
+            <div
+              style={{
+                height: "100%",
+                borderRadius: 4,
+                background: "linear-gradient(90deg, #4285f4, #a855f7, #ec4899)",
+                width: `${pct}%`,
+                transition: "width 0.3s ease-out",
+              }}
+            />
+          </div>
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 13,
+              fontWeight: 500,
+              color: "var(--text-2)",
+              marginTop: 8,
+            }}
+          >
+            {pct}%
+          </div>
         </div>
-        <div
-          style={{
-            textAlign: "center",
-            fontSize: 13,
-            fontWeight: 500,
-            color: "var(--text-2)",
-            marginTop: 8,
-          }}
-        >
-          {pct}%
-        </div>
-      </div>
+      )}
 
       <style>{`
         @keyframes summaryPulse {
