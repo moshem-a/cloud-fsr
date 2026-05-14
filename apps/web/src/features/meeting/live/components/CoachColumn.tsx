@@ -41,15 +41,22 @@ export function CoachColumn({ meetingId }: CoachColumnProps) {
     }
   }, [unpinned.length]);
 
+  const setRightTab = useLiveMeetingStore((s) => s.setRightPanelTab);
+  const setGenerating = useLiveMeetingStore((s) => s.setInfographicGenerating);
+
   function handlePin(hintId: string) {
     const hint = hints.find((h) => h.id === hintId);
     const wasPinned = pinnedIds.has(hintId);
     togglePinned(hintId);
     if (!wasPinned && hint) {
+      setGenerating(true);
+      setRightTab("infographic");
       void api(`/meetings/${meetingId}/generate-infographic`, {
         method: "POST",
         body: { hintTopic: hint.title },
-      }).catch(() => {});
+      }).catch(() => {
+        setGenerating(false);
+      });
     }
   }
 

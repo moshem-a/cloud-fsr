@@ -46,7 +46,7 @@ export type { SpeakerRole };
 const SENTIMENT_TICK_MS = 20_000;
 const FOLLOWUPS_TICK_MS = 60_000;
 const TIPS_TICK_MS = 25_000;
-const INFOGRAPHIC_TICK_MS = 60_000;
+const INFOGRAPHIC_TICK_MS = 3 * 60 * 1000;
 const INFOGRAPHIC_IMAGE_TICK_MS = 5 * 60 * 1000;
 const SUMMARY_TICK_MS = 4 * 60 * 1000;
 const ROLLING_WINDOW = 12;
@@ -59,6 +59,7 @@ const HINT_TIME_MS = 10_000;
 // priority="high" so the UI surfaces a comparison card the rep can use.
 // English-only: competitor product names stay English even in Hebrew calls.
 const HIGH_PRIORITY_REGEX = /\b(Bedrock|SageMaker|Snowflake|Databricks|OpenAI|Anthropic\s+direct|Azure\s+OpenAI|AKS|EKS|Athena|Redshift|how\s+does|what\s+about|compared?\s+to|versus|\bvs\.?\b|why\s+(not|should)|difference\s+between|too\s+expensive|not\s+sure|concerned|worried|problem\s+with|won't\s+work|can't\s+afford|not\s+in\s+budget|we're\s+happy\s+with|already\s+using|no\s+need|not\s+interested|יקר\s+מדי|לא\s+בטוח|בעיה\s+עם|לא\s+צריך)\b/i;
+const DIAGRAM_REQUEST_REGEX = /\b(show\s+(?:me\s+)?(?:a\s+)?(?:diagram|chart|graph|flow|architecture|visual)|draw\s+(?:a\s+)?(?:diagram|chart|architecture)|(?:diagram|chart|graph|flow)\s+(?:of|for|about|showing)|can\s+you\s+(?:diagram|chart|visualize)|תראה\s+לי\s+(?:תרשים|דיאגרמה|גרף)|תצייר|ארכיטקטורה|תרשים\s+זרימה)\b/i;
 // Sessions are evicted after this much idle time (no audio frames received).
 // Cloud Run instances cycle on inactivity; tune separately.
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -424,11 +425,11 @@ export async function handleFinalLine(session: ActiveSession, line: TranscriptLi
     void runHintCycle(session, highPriority ? "high" : "normal").finally(() => {
       session.hintInFlight = false;
     });
+  }
 
-    // 3b. Infographic — piggyback on the exact same trigger as hints.
-    if (!session.infographicInFlight) {
-      void runInfographicTick(session);
-    }
+  // 3c. On-demand chart — user/client mentions "diagram" / "chart" / "architecture"
+  if (DIAGRAM_REQUEST_REGEX.test(line.text) && isGeminiEnabled() && !session.infographicInFlight) {
+    void runInfographicTick(session);
   }
 
   // 4. Quick answer — when the client asks a question, generate an instant answer

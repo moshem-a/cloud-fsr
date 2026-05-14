@@ -18,8 +18,14 @@ export interface QuietAskAnswer {
   chips: string[];
 }
 
-const ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent";
+const MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+];
+
+function endpoint(model: string) {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
 
 const SYSTEM = `You are Sally, a private, on-call assistant for a Google Cloud sales rep mid-customer-call.
 The question may be in Hebrew or English — answer in the SAME language as the question.
@@ -41,6 +47,26 @@ interface GeminiResponse {
   error?: { message?: string };
 }
 
+async function callGemini(key: string, body: object): Promise<GeminiResponse> {
+  let lastErr: Error | null = null;
+  for (const model of MODELS) {
+    const res = await fetch(`${endpoint(model)}?key=${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as GeminiResponse;
+    if (res.ok) return json;
+    const msg = json.error?.message ?? `Gemini ${res.status}`;
+    if (msg.includes("is not found") || msg.includes("not supported")) {
+      lastErr = new Error(msg);
+      continue;
+    }
+    throw new Error(msg);
+  }
+  throw lastErr ?? new Error("All Gemini models failed");
+}
+
 export async function quietAsk(question: string): Promise<QuietAskAnswer> {
   const key = useAuthStore.getState().geminiKey;
   if (!key) {
@@ -57,25 +83,13 @@ export async function quietAsk(question: string): Promise<QuietAskAnswer> {
     },
   };
 
-  const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  const json = (await res.json()) as GeminiResponse;
-  if (!res.ok) {
-    throw new Error(json.error?.message ?? `Gemini ${res.status}`);
-  }
+  const json = await callGemini(key, body);
   const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   const cleaned = raw.replace(/^```json\s*|\s*```$/g, "").trim();
   let parsed: { answer?: string; chips?: string[] };
   try {
     parsed = JSON.parse(cleaned || "{}");
   } catch {
-    // Salvage: pull "answer":"..." out of broken/truncated JSON before falling
-    // through to the raw string. Handles the case where Gemini truncates the
-    // chips array but the answer is intact.
     const m = cleaned.match(/"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/);
     parsed = m ? { answer: JSON.parse(`"${m[1]}"`), chips: [] } : { answer: raw, chips: [] };
   }
@@ -133,16 +147,7 @@ export async function urgentHelp(transcript: TranscriptLine[]): Promise<QuietAsk
     },
   };
 
-  const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  const json = (await res.json()) as GeminiResponse;
-  if (!res.ok) {
-    throw new Error(json.error?.message ?? `Gemini ${res.status}`);
-  }
+  const json = await callGemini(key, body);
   const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   const cleaned = raw.replace(/^```json\s*|\s*```$/g, "").trim();
   let parsed: { answer?: string; chips?: string[] };
@@ -186,13 +191,7 @@ export async function generateClientInfographic(transcript: TranscriptLine[]): P
   };
 
   try {
-    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json()) as GeminiResponse;
-    if (!res.ok) return null;
+    const json = await callGemini(key, body);
     const raw = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     const cleaned = raw.replace(/^```json\s*|\s*```$/g, "").trim();
     const parsed = JSON.parse(cleaned || "{}") as { kind?: string; title?: string; mermaid?: string };

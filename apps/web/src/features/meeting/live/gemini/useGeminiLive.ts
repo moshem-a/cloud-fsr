@@ -4,9 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "../../../auth/store.ts";
 import { api } from "../../../../lib/http.ts";
 
-const WS_URL =
-  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
-const MODEL = "models/gemini-2.0-flash-live-001";
+const LIVE_MODELS = [
+  { api: "v1beta", model: "models/gemini-2.5-flash-native-audio-latest" },
+  { api: "v1beta", model: "models/gemini-2.0-flash-live-001" },
+  { api: "v1alpha", model: "models/gemini-2.0-flash-live-001" },
+];
+
+function wsUrl(apiVersion: string) {
+  return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${apiVersion}.GenerativeService.BidiGenerateContent`;
+}
 
 export interface UseGeminiLiveOptions {
   meetingId: string;
@@ -112,21 +118,28 @@ export function useGeminiLive(opts: UseGeminiLiveOptions): GeminiLiveHandle {
     });
   }, []);
 
-  const connect = useCallback(() => {
+  const modelIndexRef = useRef(0);
+
+  const connectWithModel = useCallback((modelIdx: number) => {
     const key = useAuthStore.getState().geminiKey;
     if (!key) {
       setError("No Gemini API key set. Add one in Settings.");
       return;
     }
+    const entry = LIVE_MODELS[modelIdx];
+    if (!entry) {
+      setError("No compatible Gemini Live model found. Check your API key.");
+      return;
+    }
 
-    const ws = new WebSocket(`${WS_URL}?key=${encodeURIComponent(key)}`);
+    const ws = new WebSocket(`${wsUrl(entry.api)}?key=${encodeURIComponent(key)}`);
     wsRef.current = ws;
     setError(null);
 
     ws.onopen = () => {
       const setup = {
         setup: {
-          model: MODEL,
+          model: entry.model,
           generationConfig: {
             responseModalities: ["AUDIO", "TEXT"],
             speechConfig: {
@@ -146,6 +159,7 @@ export function useGeminiLive(opts: UseGeminiLiveOptions): GeminiLiveHandle {
         const msg = JSON.parse(ev.data as string);
 
         if (msg.setupComplete) {
+          modelIndexRef.current = modelIdx;
           setConnected(true);
           setError(null);
           return;
@@ -180,10 +194,21 @@ export function useGeminiLive(opts: UseGeminiLiveOptions): GeminiLiveHandle {
       setConnected(false);
       if (ev.code !== 1000) {
         const detail = ev.reason || `code ${ev.code}`;
+        if (detail.includes("is not found") || detail.includes("not supported")) {
+          const nextIdx = modelIdx + 1;
+          if (nextIdx < LIVE_MODELS.length) {
+            connectWithModel(nextIdx);
+            return;
+          }
+        }
         setError(`Gemini Live disconnected (${detail}). Check your API key and try again.`);
       }
     };
   }, [playAudioChunk, flushTextBuffer]);
+
+  const connect = useCallback(() => {
+    connectWithModel(0);
+  }, [connectWithModel]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {

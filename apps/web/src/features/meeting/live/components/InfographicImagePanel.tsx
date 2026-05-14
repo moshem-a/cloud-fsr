@@ -1,5 +1,5 @@
 import { Chev, Image } from "@scoach/ui/icons";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { api } from "../../../../lib/http.ts";
 import { useLiveMeetingStore } from "../store.ts";
@@ -14,6 +14,16 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
   const setIndex = useLiveMeetingStore((s) => s.setActiveImageIndex);
   const interval = useLiveMeetingStore((s) => s.imageIntervalMin);
   const setImageInterval = useLiveMeetingStore((s) => s.setImageIntervalMin);
+  const generating = useLiveMeetingStore((s) => s.infographicGenerating);
+  const setGenerating = useLiveMeetingStore((s) => s.setInfographicGenerating);
+
+  const prevCountRef = useRef(images.length);
+  useEffect(() => {
+    if (images.length > prevCountRef.current && generating) {
+      setGenerating(false);
+    }
+    prevCountRef.current = images.length;
+  }, [images.length, generating, setGenerating]);
 
   const count = images.length;
   const safeIndex = count > 0 ? Math.min(activeIndex, count - 1) : 0;
@@ -61,14 +71,41 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
     </div>
   );
 
+  const loadingBar = generating && (
+    <div className="ig-generating">
+      <div className="ig-generating-inner">
+        <span className="dot dot-pulse" style={{ background: "var(--gc-blue)" }} />
+        <span className="dot dot-pulse" style={{ background: "var(--gc-blue)", animationDelay: "160ms" }} />
+        <span className="dot dot-pulse" style={{ background: "var(--gc-blue)", animationDelay: "320ms" }} />
+        <span style={{ fontSize: 12, color: "var(--text-3)", marginLeft: 4 }}>Generating infographic…</span>
+      </div>
+    </div>
+  );
+
   if (count === 0) {
     return (
       <div className="ig-empty">
-        <Image size={28} color="var(--text-4)" />
-        <div className="ig-empty-title">Infographic</div>
-        <div className="ig-empty-sub">
-          AI-generated visual summaries will appear at regular intervals
-        </div>
+        {generating ? (
+          <>
+            <div className="ig-generating-hero">
+              <span className="dot dot-pulse" style={{ background: "var(--gc-blue)", width: 10, height: 10 }} />
+              <span className="dot dot-pulse" style={{ background: "var(--gc-blue)", width: 10, height: 10, animationDelay: "160ms" }} />
+              <span className="dot dot-pulse" style={{ background: "var(--gc-blue)", width: 10, height: 10, animationDelay: "320ms" }} />
+            </div>
+            <div className="ig-empty-title">Generating Infographic…</div>
+            <div className="ig-empty-sub">
+              AI is creating a visual summary based on the pinned hint
+            </div>
+          </>
+        ) : (
+          <>
+            <Image size={28} color="var(--text-4)" />
+            <div className="ig-empty-title">Infographic</div>
+            <div className="ig-empty-sub">
+              AI-generated visual summaries will appear at regular intervals
+            </div>
+          </>
+        )}
         <div style={{ marginTop: 12 }}>{intervalSlider}</div>
       </div>
     );
@@ -79,6 +116,7 @@ export function InfographicImagePanel({ meetingId }: InfographicImagePanelProps)
       <div style={{ display: "flex", justifyContent: "flex-end", padding: "6px 12px 0" }}>
         {intervalSlider}
       </div>
+      {loadingBar}
 
       {current && (
         <div className="ig-carousel">

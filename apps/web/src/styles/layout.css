@@ -757,6 +757,13 @@
 }
 .ig-empty-title { font-size: 15px; font-weight: 600; color: var(--text-2); }
 .ig-empty-sub { font-size: 13px; color: var(--text-4); max-width: 240px; line-height: 1.45; }
+.ig-generating-hero { display: flex; gap: 6px; margin-bottom: 4px; }
+.ig-generating { padding: 6px 12px; }
+.ig-generating-inner {
+  display: flex; align-items: center; gap: 4px; justify-content: center;
+  padding: 6px 12px; border-radius: 6px;
+  background: var(--gc-blue-50, #e8f0fe); border: 1px solid var(--gc-blue, #1a73e8);
+}
 
 .ig-quiet-pin { margin-bottom: 4px; }
 

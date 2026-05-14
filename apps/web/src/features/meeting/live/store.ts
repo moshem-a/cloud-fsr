@@ -56,6 +56,7 @@ export interface LiveMeetingState {
   pinnedChartIds: Set<string>;
   hintThreshold: number;
   imageIntervalMin: number;
+  infographicGenerating: boolean;
 
   // setters
   reset: () => void;
@@ -86,6 +87,7 @@ export interface LiveMeetingState {
   togglePinnedChart: (id: string) => void;
   setHintThreshold: (n: number) => void;
   setImageIntervalMin: (n: number) => void;
+  setInfographicGenerating: (v: boolean) => void;
 }
 
 export const useLiveMeetingStore = create<LiveMeetingState>()(
@@ -120,6 +122,7 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
     pinnedChartIds: new Set<string>(),
     hintThreshold: 0.91,
     imageIntervalMin: 5,
+    infographicGenerating: false,
 
     reset: () =>
       set({
@@ -152,6 +155,7 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
         pinnedChartIds: new Set<string>(),
         hintThreshold: 0.91,
         imageIntervalMin: 5,
+        infographicGenerating: false,
       }),
     setConnection: (connected) => set({ connected }),
     setListening: (listening) => set({ listening }),
@@ -268,5 +272,6 @@ export const useLiveMeetingStore = create<LiveMeetingState>()(
       }),
     setHintThreshold: (hintThreshold) => set({ hintThreshold }),
     setImageIntervalMin: (imageIntervalMin) => set({ imageIntervalMin }),
+    setInfographicGenerating: (infographicGenerating) => set({ infographicGenerating }),
   })),
 );
